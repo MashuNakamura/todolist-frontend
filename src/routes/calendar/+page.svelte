@@ -11,6 +11,9 @@
         Save,
         X,
         Hash,
+        Check,
+        Trash2,
+        Edit,
     } from "lucide-svelte";
     import { Calendar } from "$lib/components/ui/calendar";
     import * as Card from "$lib/components/ui/card";
@@ -159,6 +162,23 @@
         }
     }
 
+    function toggleDone(task: any) {
+        const index = tasks.findIndex((t) => t.id === task.id);
+        if (index !== -1) {
+            tasks[index].done = !tasks[index].done;
+            toast.success(
+                tasks[index].done
+                    ? "Task marked as done"
+                    : "Task marked as undone",
+            );
+        }
+    }
+
+    function deleteTask(id: number) {
+        tasks = tasks.filter((t) => t.id !== id);
+        toast.error("Task deleted from calendar");
+    }
+
     const priorityColor = (p: string) => {
         if (p === "High") return "text-red-500 border-red-500/20 bg-red-500/10";
         if (p === "Medium")
@@ -304,14 +324,49 @@
                                                         >
                                                     </div>
                                                 </div>
-                                                <Button
-                                                    variant="ghost"
-                                                    size="icon"
-                                                    class="h-8 w-8"
-                                                    ><MoreVertical
-                                                        class="h-4 w-4"
-                                                    /></Button
-                                                >
+                                                <DropdownMenu.Root>
+                                                    <DropdownMenu.Trigger>
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="icon"
+                                                            class="h-8 w-8"
+                                                        >
+                                                            <MoreVertical
+                                                                class="h-4 w-4"
+                                                            />
+                                                        </Button>
+                                                    </DropdownMenu.Trigger>
+                                                    <DropdownMenu.Content
+                                                        align="end"
+                                                    >
+                                                        <DropdownMenu.Item
+                                                            onclick={() =>
+                                                                toggleDone(
+                                                                    task,
+                                                                )}
+                                                        >
+                                                            <Check
+                                                                class="mr-2 h-4 w-4"
+                                                            />
+                                                            {task.done
+                                                                ? "Mark as Undone"
+                                                                : "Mark as Done"}
+                                                        </DropdownMenu.Item>
+                                                        <DropdownMenu.Separator
+                                                        />
+                                                        <DropdownMenu.Item
+                                                            class="text-destructive"
+                                                            onclick={() =>
+                                                                deleteTask(
+                                                                    task.id,
+                                                                )}
+                                                        >
+                                                            <Trash2
+                                                                class="mr-2 h-4 w-4"
+                                                            /> Delete
+                                                        </DropdownMenu.Item>
+                                                    </DropdownMenu.Content>
+                                                </DropdownMenu.Root>
                                             </Card.Content>
                                         </Card.Root>
                                     </div>

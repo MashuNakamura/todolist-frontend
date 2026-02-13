@@ -16,6 +16,7 @@
     import {
         Plus,
         Edit,
+        Check,
         MoreVertical,
         Clock,
         Tag,
@@ -175,6 +176,27 @@
     function deleteTask(id: number) {
         tasks = tasks.filter((t) => t.id !== id);
         toast.error("Task deleted");
+    }
+    function toggleDone(task: any) {
+        const index = tasks.findIndex((t) => t.id === task.id);
+        if (index !== -1) {
+            tasks[index].done = !tasks[index].done;
+            toast.success(
+                tasks[index].done
+                    ? "Task marked as done"
+                    : "Task marked as undone",
+            );
+        }
+    }
+    function bulkMarkDone() {
+        tasks = tasks.map((t) => {
+            if (selectedIds.includes(t.id)) {
+                return { ...t, done: true };
+            }
+            return t;
+        });
+        selectedIds = [];
+        toast.success("Selected tasks marked as done");
     }
     function toggleTag(tagName: string) {
         if (newTask.tags.includes(tagName))
@@ -345,7 +367,7 @@
                                 class="px-3 md:px-4 flex items-center border-r shrink-0"
                             >
                                 <Checkbox
-                                    checked={task.done}
+                                    checked={selectedIds.includes(task.id)}
                                     onCheckedChange={(v) => {
                                         if (v)
                                             selectedIds = [
@@ -396,7 +418,9 @@
                                         <CalendarIcon class="h-3 w-3" /> Feb 12,
                                         2026
                                     </div>
-                                    <div class="flex flex-col items-end gap-1">
+                                    <div
+                                        class="flex flex-col items-center gap-1"
+                                    >
                                         <Badge
                                             variant="outline"
                                             class="font-bold text-[8px] md:text-[9px] uppercase {priorityColor(
@@ -441,6 +465,14 @@
                                             onclick={() => openEditDialog(task)}
                                             ><Edit class="mr-2 h-4 w-4" /> Edit Task</DropdownMenu.Item
                                         >
+                                        <DropdownMenu.Item
+                                            onclick={() => toggleDone(task)}
+                                        >
+                                            <Check class="mr-2 h-4 w-4" />
+                                            {task.done
+                                                ? "Mark as Undone"
+                                                : "Mark as Done"}
+                                        </DropdownMenu.Item>
                                         <DropdownMenu.Separator />
                                         <DropdownMenu.Item
                                             class="text-destructive font-bold"
@@ -720,6 +752,40 @@
         {/if}
     </Sheet.Content>
 </Sheet.Root>
+
+{#if selectedIds.length > 0}
+    <div class="fixed bottom-8 left-1/2 -translate-x-1/2 z-50">
+        <div
+            class="bg-primary text-primary-foreground px-4 md:px-6 py-3 rounded-full shadow-2xl flex items-center gap-4 border border-white/10"
+        >
+            <span class="text-xs md:text-sm font-bold tracking-tight uppercase"
+                >{selectedIds.length} Selected</span
+            >
+            <Separator
+                orientation="vertical"
+                class="h-4 bg-primary-foreground/30"
+            />
+            <Button
+                variant="secondary"
+                size="sm"
+                class="h-8 rounded-full font-bold px-4 text-[10px] md:text-xs text-primary bg-white"
+                onclick={bulkMarkDone}
+            >
+                <Check class="mr-2 h-3 w-3" /> Mark Done
+            </Button>
+            <Button
+                variant="destructive"
+                size="sm"
+                class="h-8 rounded-full font-black px-4 text-[10px] md:text-xs"
+                onclick={() => {
+                    tasks = tasks.filter((t) => !selectedIds.includes(t.id));
+                    selectedIds = [];
+                    toast.error("Tasks deleted");
+                }}>Delete All</Button
+            >
+        </div>
+    </div>
+{/if}
 
 <style>
     :global(.custom-time-input::-webkit-calendar-picker-indicator) {

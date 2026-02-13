@@ -17,6 +17,7 @@
     import {
         Plus,
         Edit,
+        Check,
         MoreVertical,
         Clock,
         Tag,
@@ -158,6 +159,29 @@
     function deleteTask(id: number) {
         tasks = tasks.filter((t) => t.id !== id);
         toast.error("Task deleted");
+    }
+
+    function toggleDone(task: any) {
+        const index = tasks.findIndex((t) => t.id === task.id);
+        if (index !== -1) {
+            tasks[index].done = !tasks[index].done;
+            toast.success(
+                tasks[index].done
+                    ? "Task marked as done"
+                    : "Task marked as undone",
+            );
+        }
+    }
+
+    function bulkMarkDone() {
+        tasks = tasks.map((t) => {
+            if (selectedIds.includes(t.id)) {
+                return { ...t, done: true };
+            }
+            return t;
+        });
+        selectedIds = [];
+        toast.success("Selected tasks marked as done");
     }
 
     // Toggle Tag: Tambah jika belum ada, hapus jika sudah ada
@@ -333,7 +357,7 @@
                                 class="px-3 md:px-4 flex items-center border-r shrink-0"
                             >
                                 <Checkbox
-                                    checked={task.done}
+                                    checked={selectedIds.includes(task.id)}
                                     onCheckedChange={(v) => {
                                         if (v)
                                             selectedIds = [
@@ -388,7 +412,7 @@
                                     class="w-[85px] md:w-[120px] flex items-center justify-between shrink-0 border-l pl-3 md:pl-4"
                                 >
                                     <div
-                                        class="flex flex-col items-end gap-1 w-full"
+                                        class="flex flex-col items-center gap-1 w-full"
                                     >
                                         <Badge
                                             variant="outline"
@@ -434,6 +458,14 @@
                                             onclick={() => openEditDialog(task)}
                                             ><Edit class="mr-2 h-4 w-4" /> Edit Task</DropdownMenu.Item
                                         >
+                                        <DropdownMenu.Item
+                                            onclick={() => toggleDone(task)}
+                                        >
+                                            <Check class="mr-2 h-4 w-4" />
+                                            {task.done
+                                                ? "Mark as Undone"
+                                                : "Mark as Done"}
+                                        </DropdownMenu.Item>
                                         <DropdownMenu.Separator />
                                         <DropdownMenu.Item
                                             class="text-destructive font-bold"
@@ -807,6 +839,14 @@
                 orientation="vertical"
                 class="h-4 bg-primary-foreground/30"
             />
+            <Button
+                variant="secondary"
+                size="sm"
+                class="h-8 rounded-full font-bold px-4 text-[10px] md:text-xs text-primary bg-white"
+                onclick={bulkMarkDone}
+            >
+                <Check class="mr-2 h-3 w-3" /> Mark Done
+            </Button>
             <Button
                 variant="destructive"
                 size="sm"
