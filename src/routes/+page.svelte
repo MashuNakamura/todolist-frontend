@@ -1,930 +1,287 @@
 <script lang="ts">
-    import { Button, buttonVariants } from "$lib/components/ui/button";
-    import * as Card from "$lib/components/ui/card";
-    import { Checkbox } from "$lib/components/ui/checkbox";
-    import { Badge } from "$lib/components/ui/badge";
-    import * as DropdownMenu from "$lib/components/ui/dropdown-menu";
-    import * as Sheet from "$lib/components/ui/sheet";
-    import * as Pagination from "$lib/components/ui/pagination";
-    import * as ScrollArea from "$lib/components/ui/scroll-area";
-    import * as Dialog from "$lib/components/ui/dialog";
-    import { Input } from "$lib/components/ui/input";
-    import { Label } from "$lib/components/ui/label";
-    import { Textarea } from "$lib/components/ui/textarea";
-    import { Separator } from "$lib/components/ui/separator";
-    import * as Progress from "$lib/components/ui/progress";
-    import { Calendar } from "$lib/components/ui/calendar";
-    import { Skeleton } from "$lib/components/ui/skeleton";
+    import { Button } from "$lib/components/ui/button";
     import {
-        Plus,
-        Edit,
-        Check,
-        MoreVertical,
-        Clock,
-        Tag,
-        AlignLeft,
-        CheckCircle2,
-        ChevronRight,
-        ChevronDown,
-        Calendar as CalendarIcon,
-        LayoutGrid,
-        Search,
-        Trash2,
-        Eye,
-        X,
-        Hash,
+        ArrowRight,
+        Zap,
+        Shield,
+        Layout,
+        Github,
+        Linkedin,
+        Code2,
+        Terminal,
     } from "lucide-svelte";
-    import { toast } from "svelte-sonner";
     import { onMount } from "svelte";
-    import { api, type Task } from "$lib";
+    import { Badge } from "$lib/components/ui/badge";
+    import * as Card from "$lib/components/ui/card";
 
-    // Task State
-    let tasks = $state<Task[]>([]);
+    let isLoggedIn = $state(false);
 
-    // Category State (Dummy)
-    let categories = $state([
-        { name: "Dev", color: "bg-blue-500" },
-        { name: "UI", color: "bg-pink-500" },
-        { name: "Backend", color: "bg-orange-500" },
-        { name: "Urgent", color: "bg-red-500" },
-        { name: "Database", color: "bg-emerald-500" },
-    ]);
-
-    // State Form Add Task
-    let newTask = $state({
-        text: "",
-        desc: "",
-        longDesc: "",
-        priority: "Medium",
-        time: "09:00",
-        tags: [] as string[],
-    });
-    let tagInput = $state("");
-
-    let categorySearch = $state("");
-    let selectedIds = $state<number[]>([]);
-    let selectedTask = $state<any>(null);
-    let isDetailOpen = $state(false);
-    let isAddDialogOpen = $state(false);
-    let isEditMode = $state(false);
-    let editingTaskId = $state<number | null>(null);
-    let isLoading = $state(true);
-
-    // Fetch Tasks on Mount
-    onMount(async () => {
-        try {
-            isLoading = true;
-            const token = localStorage.getItem("token");
-            if (!token) {
-                window.location.href = "/login";
-                return;
-            }
-
-            const fetchTasks = await api.getTasks();
-
-            tasks = fetchTasks.map((task: any) => ({
-                ID: task.ID,
-                title: task.title,
-                short_desc: task.short_desc,
-                long_desc: task.long_desc,
-                priority: task.priority,
-                time: task.time,
-                tags: task.tags || [],
-                status: task.status,
-                date: task.date,
-                user_id: task.user_id,
-            }));
-        } catch (error) {
-            console.error("Error fetching tasks:", error);
-            toast.error("Failed to load tasks");
-        } finally {
-            isLoading = false;
+    onMount(() => {
+        if (localStorage.getItem("token")) {
+            isLoggedIn = true;
         }
     });
 
-    // Pagination & Filter Logic
-    let currentPage = $state(1);
-    let perPage = 5;
-    const count = $derived(tasks.length);
-    const paginatedTasks = $derived(
-        tasks.slice((currentPage - 1) * perPage, currentPage * perPage),
-    );
+    const features = [
+        {
+            icon: Zap,
+            title: "Lightning Fast",
+            desc: "Built with Go Fiber backend for millisecond latency.",
+        },
+        {
+            icon: Layout,
+            title: "Beautifully Organized",
+            desc: "A clutter-free SvelteKit interface for maximum focus.",
+        },
+        {
+            icon: Shield,
+            title: "Secure Architecture",
+            desc: "Standardized JWT Auth and secure data handling.",
+        },
+    ];
 
-    const filteredCategories = $derived(
-        categories.filter((cat) =>
-            cat.name.toLowerCase().includes(categorySearch.toLowerCase()),
-        ),
-    );
-    const completedCount = $derived(
-        tasks.filter((t) => t.status === "done").length,
-    );
-    const progressPercent = $derived(
-        tasks.length > 0 ? (completedCount / tasks.length) * 100 : 0,
-    );
-
-    // CRUD Handlers
-
-    // SAVE (CREATE / UPDATE)
-    async function handleSaveTask(e: Event) {
-        e.preventDefault();
-
-        // Siapkan Payload buat Backend (pake any biar TS gak rewel)
-        const payload: any = {
-            title: newTask.text,
-            short_desc: newTask.desc,
-            long_desc: newTask.longDesc,
-            priority: newTask.priority,
-            time: newTask.time,
-            tags: newTask.tags,
-            status: "todo",
-        };
-
-        try {
-            if (isEditMode && editingTaskId) {
-                // UPDATE
-                const res = await api.updateTask(editingTaskId, payload);
-                if (res.success) {
-                    const index = tasks.findIndex(
-                        (t) => t.ID === editingTaskId,
-                    );
-                    if (index !== -1) {
-                        // Update local state
-                        tasks[index] = {
-                            ...tasks[index],
-                            title: payload.title,
-                            short_desc: payload.short_desc,
-                            long_desc: payload.long_desc,
-                            priority: payload.priority,
-                            time: payload.time,
-                            tags: payload.tags,
-                        };
-                    }
-                    toast.success("Task updated!");
-                } else {
-                    toast.error("Update failed: " + res.message);
-                }
-            } else {
-                // --- CREATE ---
-                const res = await api.createTask(payload);
-                if (res.success) {
-                    const newItem = res.data; // Data asli dari DB
-                    tasks.push({
-                        ID: newItem.ID,
-                        title: newItem.Title,
-                        short_desc: newItem.ShortDesc,
-                        long_desc: newItem.LongDesc,
-                        priority: newItem.Priority,
-                        time: newItem.Time,
-                        tags: newItem.Tags || [],
-                        status: newItem.Status,
-                        date: newItem.Date,
-                        user_id: newItem.UserID,
-                    });
-                    toast.success("Task created!");
-                } else {
-                    toast.error("Create failed: " + res.message);
-                }
-            }
-
-            // Reset Form
-            newTask = {
-                text: "",
-                desc: "",
-                longDesc: "",
-                priority: "Medium",
-                time: "09:00",
-                tags: [],
-            };
-            isAddDialogOpen = false;
-            isEditMode = false;
-            editingTaskId = null;
-        } catch (error) {
-            console.error("Error saving task:", error);
-            toast.error("Failed to save task");
-        }
-    }
-
-    // DELETE SINGLE
-    async function deleteTask(id: number) {
-        if (!confirm("Delete this task?")) return;
-
-        try {
-            const res = await api.deleteTask([id]);
-            if (res.success) {
-                tasks = tasks.filter((t) => t.ID !== id);
-                toast.success("Task deleted");
-            } else {
-                toast.error("Failed delete");
-            }
-        } catch (error) {
-            toast.error("Error deleting");
-        }
-    }
-
-    // DELETE BULK (Mark Done / Delete Selected)
-    async function bulkMarkDone() {
-        try {
-            const res = await api.updateStatus(selectedIds, "done");
-            if (res.success) {
-                tasks = tasks.map((t) => {
-                    if (selectedIds.includes(t.ID)) {
-                        return { ...t, status: "done" };
-                    }
-                    return t;
-                });
-                selectedIds = [];
-                toast.success("Selected tasks marked as done");
-            }
-        } catch (error) {
-            toast.error("Failed bulk update");
-        }
-    }
-
-    // TOGGLE DONE (Update Status Single)
-    async function toggleDone(task: any) {
-        const newStatus = task.done ? "todo" : "done";
-        try {
-            const res = await api.updateTask(task.ID, {
-                status: newStatus,
-            } as any);
-            if (res.success) {
-                const index = tasks.findIndex((t) => t.ID === task.ID);
-                if (index !== -1) {
-                    tasks[index].status = newStatus;
-                    toast.success(
-                        tasks[index].status === "done"
-                            ? "Marked as done"
-                            : "Marked as undone",
-                    );
-                }
-            }
-        } catch (error) {
-            toast.error("Failed to update status");
-        }
-    }
-
-    // --- UI HELPERS ---
-    function openDetail(task: any) {
-        selectedTask = task;
-        isDetailOpen = true;
-    }
-
-    function openEditDialog(task: any) {
-        isEditMode = true;
-        editingTaskId = task.id;
-        newTask = {
-            text: task.text,
-            desc: task.desc || "",
-            longDesc: task.longDesc || "",
-            priority: task.priority,
-            time: task.time,
-            tags: [...task.tags],
-        };
-        isAddDialogOpen = true;
-        isDetailOpen = false;
-    }
-
-    function toggleTag(tagName: string) {
-        if (newTask.tags.includes(tagName)) {
-            newTask.tags = newTask.tags.filter((t) => t !== tagName);
-        } else {
-            newTask.tags.push(tagName);
-        }
-    }
-
-    function addCustomTag(e: KeyboardEvent) {
-        if (e.key === "Enter" && tagInput.trim()) {
-            e.preventDefault();
-            if (!newTask.tags.includes(tagInput.trim())) {
-                newTask.tags.push(tagInput.trim());
-            }
-            tagInput = "";
-        }
-    }
-
-    const priorityColor = (p: string) => {
-        if (p === "High") return "bg-red-500/10 text-red-500 border-red-500/20";
-        if (p === "Medium")
-            return "bg-yellow-500/10 text-yellow-500 border-yellow-500/20";
-        return "bg-blue-500/10 text-blue-500 border-blue-500/20";
-    };
+    const techStack = [
+        "Golang",
+        "SvelteKit",
+        "TypeScript",
+        "Shadcn UI",
+        "PostgreSQL",
+    ];
 </script>
 
-{#snippet paginationControl()}
-    <Pagination.Root {count} {perPage} bind:page={currentPage}>
-        {#snippet children({ pages, currentPage })}
-            <Pagination.Content>
-                <Pagination.Item><Pagination.Previous /></Pagination.Item>
-                {#each pages as page (page.key)}
-                    {#if page.type === "ellipsis"}
-                        <Pagination.Item
-                            ><Pagination.Ellipsis /></Pagination.Item
-                        >
-                    {:else}
-                        <Pagination.Item>
-                            <Pagination.Link
-                                {page}
-                                isActive={currentPage === page.value}
-                                >{page.value}</Pagination.Link
-                            >
-                        </Pagination.Item>
-                    {/if}
-                {/each}
-                <Pagination.Item><Pagination.Next /></Pagination.Item>
-            </Pagination.Content>
-        {/snippet}
-    </Pagination.Root>
-{/snippet}
-
-<div class="w-full pb-32 px-2 md:px-6 bg-background min-h-screen">
-    <div class="flex items-center justify-between gap-4 mb-8">
-        <div>
-            <h1 class="text-2xl md:text-3xl font-bold tracking-tight">
-                Dashboard
-            </h1>
-            <p class="text-muted-foreground text-[10px] md:text-sm font-medium">
-                Welcome back! You have <span class="font-bold text-foreground"
-                    >{tasks.length - completedCount} tasks</span
-                > left today.
-            </p>
-        </div>
-        <Button
-            size="sm"
-            onclick={() => {
-                isEditMode = false;
-                newTask = {
-                    text: "",
-                    desc: "",
-                    longDesc: "",
-                    priority: "Medium",
-                    time: "09:00",
-                    tags: [],
-                };
-                isAddDialogOpen = true;
-            }}
-        >
-            <Plus class="mr-1 h-4 w-4" />
-            <span class="hidden md:inline">Add Task</span><span
-                class="md:hidden text-xs">Add</span
-            >
-        </Button>
-    </div>
-
-    <div
-        class="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start lg:items-stretch"
+<div
+    class="flex flex-col min-h-screen bg-background text-foreground selection:bg-primary/20"
+>
+    <header
+        class="px-6 h-20 flex items-center justify-between border-b border-border/40 backdrop-blur-sm sticky top-0 z-50 bg-background/80"
     >
-        <div class="lg:col-span-8 flex flex-col gap-6 h-full">
-            <Card.Root class="border-none bg-muted/20 shadow-none shrink-0">
-                <Card.Content class="p-6 space-y-3">
-                    <div
-                        class="flex items-center justify-between text-sm font-bold"
-                    >
-                        <div class="flex items-center gap-2">
-                            <CheckCircle2 class="h-4 w-4 text-primary" /> Progress
-                        </div>
-                        <span>{Math.round(progressPercent)}% Done</span>
-                    </div>
-                    <Progress.Root value={progressPercent} class="h-2" />
-                </Card.Content>
-            </Card.Root>
+        <div class="flex items-center gap-3">
+            <div
+                class="h-10 w-10 bg-primary rounded-xl flex items-center justify-center shadow-lg shadow-primary/20"
+            >
+                <span class="text-xl font-bold text-primary-foreground">事</span
+                >
+            </div>
+            <span class="text-2xl font-bold tracking-tight">Koto.</span>
+        </div>
 
-            <div class="flex flex-col gap-3 flex-1">
-                {#if isLoading}
-                    {#each Array(5) as _}
-                        <div
-                            class="flex items-center space-x-4 p-4 border rounded-xl bg-card"
-                        >
-                            <Skeleton class="h-5 w-5 rounded-md" />
-                            <div class="space-y-2 flex-1">
-                                <Skeleton class="h-4 w-[60%]" />
-                                <Skeleton class="h-3 w-[40%]" />
-                            </div>
-                            <Skeleton class="h-8 w-8 rounded-full" />
-                        </div>
-                    {/each}
-                {:else}
-                    {#each paginatedTasks as task (task.ID)}
+        <nav
+            class="hidden md:flex gap-8 text-sm font-bold text-muted-foreground uppercase tracking-widest"
+        >
+            <a href="#features" class="hover:text-foreground transition-colors"
+                >Features</a
+            >
+            <a href="#developer" class="hover:text-foreground transition-colors"
+                >About</a
+            >
+        </nav>
+
+        <div class="flex items-center gap-4">
+            {#if isLoggedIn}
+                <Button
+                    href="/dashboard"
+                    class="font-bold shadow-lg shadow-primary/25"
+                >
+                    Dashboard <ArrowRight class="ml-2 h-4 w-4" />
+                </Button>
+            {:else}
+                <Button
+                    href="/auth"
+                    variant="ghost"
+                    class="font-bold hover:bg-muted">Log in</Button
+                >
+                <Button
+                    href="/auth?mode=register"
+                    variant="default"
+                    class="font-bold shadow-md">Get Started</Button
+                >
+            {/if}
+        </div>
+    </header>
+
+    <main class="flex-1">
+        <section
+            class="py-24 md:py-40 px-6 flex flex-col items-center text-center max-w-5xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-5 duration-1000"
+        >
+            <h1
+                class="text-5xl md:text-7xl font-extrabold tracking-tight text-balance leading-tight"
+            >
+                Master your day with <br />
+                <span
+                    class="bg-gradient-to-r from-primary to-purple-600 bg-clip-text text-transparent"
+                    >Unmatched Clarity.</span
+                >
+            </h1>
+
+            <p
+                class="text-lg md:text-xl text-muted-foreground max-w-2xl text-balance leading-relaxed"
+            >
+                Koto combines the speed of Go with the elegance of SvelteKit.
+                Experience a todo list that feels like a natural extension of
+                your mind.
+            </p>
+
+            <div class="flex flex-col sm:flex-row gap-4 pt-4">
+                <Button
+                    size="lg"
+                    href={isLoggedIn ? "/dashboard" : "/auth"}
+                    class="h-12 px-8 text-base font-bold shadow-xl shadow-primary/20 hover:scale-105 transition-transform"
+                >
+                    {isLoggedIn ? "Open Dashboard" : "Start for Free"}
+                </Button>
+                <Button
+                    size="lg"
+                    href="#developer"
+                    variant="outline"
+                    class="h-12 px-8 text-base font-bold"
+                >
+                    Meet the Maker
+                </Button>
+            </div>
+        </section>
+
+        <section
+            id="features"
+            class="py-24 bg-muted/30 border-y border-border/50"
+        >
+            <div class="container px-6 mx-auto">
+                <div class="text-center mb-16 space-y-4">
+                    <h2 class="text-3xl font-bold tracking-tight">Why Koto?</h2>
+                    <p class="text-muted-foreground">
+                        Minimalism meets performance.
+                    </p>
+                </div>
+                <div class="grid md:grid-cols-3 gap-8">
+                    {#each features as feature}
                         <Card.Root
-                            class="group transition-all {task.status === 'done'
-                                ? 'bg-muted/40 opacity-70'
-                                : 'bg-card'}"
+                            class="bg-background border shadow-sm hover:shadow-md transition-all"
                         >
-                            <Card.Content class="p-0 flex items-stretch">
+                            <Card.Header>
                                 <div
-                                    class="px-3 md:px-4 flex items-center border-r shrink-0"
+                                    class="h-12 w-12 rounded-lg bg-primary/10 flex items-center justify-center text-primary mb-4"
                                 >
-                                    <Checkbox
-                                        checked={selectedIds.includes(task.ID)}
-                                        onCheckedChange={(v) => {
-                                            if (v)
-                                                selectedIds = [
-                                                    ...selectedIds,
-                                                    task.ID,
-                                                ];
-                                            else
-                                                selectedIds =
-                                                    selectedIds.filter(
-                                                        (id) => id !== task.ID,
-                                                    );
-                                        }}
-                                    />
+                                    <feature.icon class="h-6 w-6" />
                                 </div>
-                                <button
-                                    type="button"
-                                    class="flex-1 p-3 md:p-4 text-left focus:outline-none flex items-center justify-between gap-4 min-w-0"
-                                    onclick={() => openDetail(task)}
+                                <Card.Title>{feature.title}</Card.Title>
+                            </Card.Header>
+                            <Card.Content>
+                                <p
+                                    class="text-muted-foreground leading-relaxed"
                                 >
-                                    <div class="flex-1 min-w-0">
-                                        <div
-                                            class="flex items-center gap-2 mb-1"
-                                        >
-                                            <h3
-                                                class="text-sm md:text-base font-semibold truncate {task.status ===
-                                                'done'
-                                                    ? 'line-through text-muted-foreground'
-                                                    : ''}"
-                                            >
-                                                {task.title}
-                                            </h3>
-                                            <div class="flex gap-1 shrink-0">
-                                                {#each task.tags.slice(0, 1) as t}
-                                                    <Badge
-                                                        variant="secondary"
-                                                        class="text-[8px] px-1.5 h-4 font-bold uppercase"
-                                                        >{t}</Badge
-                                                    >
-                                                {/each}
-                                            </div>
-                                            {#if task.long_desc}
-                                                <AlignLeft
-                                                    class="h-3 w-3 text-muted-foreground/50 ml-1"
-                                                />
-                                            {/if}
-                                        </div>
-                                        {#if task.short_desc}
-                                            <p
-                                                class="text-muted-foreground text-[10px] md:text-xs italic line-clamp-1"
-                                            >
-                                                "{task.short_desc}"
-                                            </p>
-                                        {/if}
-                                    </div>
-                                    <div
-                                        class="w-[85px] md:w-[120px] flex items-center justify-between shrink-0 border-l pl-3 md:pl-4"
-                                    >
-                                        <div
-                                            class="flex flex-col items-center gap-1 w-full"
-                                        >
-                                            <Badge
-                                                variant="outline"
-                                                class="font-bold text-[8px] md:text-[9px] uppercase {priorityColor(
-                                                    task.priority,
-                                                )}">{task.priority}</Badge
-                                            >
-                                            <div
-                                                class="flex items-center gap-1 text-[9px] text-muted-foreground font-bold font-mono"
-                                            >
-                                                <Clock class="h-3 w-3" />
-                                                {task.time}
-                                            </div>
-                                        </div>
-                                        <ChevronRight
-                                            class="h-4 w-4 text-muted-foreground hidden md:block opacity-0 group-hover:opacity-100 transition-opacity ml-1"
-                                        />
-                                    </div>
-                                </button>
-                                <div
-                                    class="pr-2 flex items-center border-l md:border-none"
-                                >
-                                    <DropdownMenu.Root>
-                                        <DropdownMenu.Trigger
-                                            ><Button
-                                                variant="ghost"
-                                                size="icon"
-                                                class="h-8 w-8 rounded-full"
-                                                ><MoreVertical
-                                                    class="h-4 w-4"
-                                                /></Button
-                                            ></DropdownMenu.Trigger
-                                        >
-                                        <DropdownMenu.Content
-                                            align="end"
-                                            class="w-40"
-                                        >
-                                            <DropdownMenu.Item
-                                                onclick={() => openDetail(task)}
-                                                ><Eye class="mr-2 h-4 w-4" /> View
-                                                Details</DropdownMenu.Item
-                                            >
-                                            <DropdownMenu.Item
-                                                onclick={() =>
-                                                    openEditDialog(task)}
-                                                ><Edit class="mr-2 h-4 w-4" /> Edit
-                                                Task</DropdownMenu.Item
-                                            >
-                                            <DropdownMenu.Item
-                                                onclick={() => toggleDone(task)}
-                                            >
-                                                <Check class="mr-2 h-4 w-4" />
-                                                {task.status
-                                                    ? "Mark as Undone"
-                                                    : "Mark as Done"}
-                                            </DropdownMenu.Item>
-                                            <DropdownMenu.Separator />
-                                            <DropdownMenu.Item
-                                                class="text-destructive font-bold"
-                                                onclick={() =>
-                                                    deleteTask(task.ID)}
-                                                ><Trash2 class="mr-2 h-4 w-4" />
-                                                Delete Task</DropdownMenu.Item
-                                            >
-                                        </DropdownMenu.Content>
-                                    </DropdownMenu.Root>
-                                </div>
+                                    {feature.desc}
+                                </p>
                             </Card.Content>
                         </Card.Root>
                     {/each}
-                {/if}
+                </div>
             </div>
+        </section>
 
-            <div
-                class="hidden md:flex pt-6 justify-center border-t bg-background mt-auto shrink-0"
-            >
-                {@render paginationControl()}
-            </div>
-        </div>
-
-        <div class="lg:col-span-4 space-y-6 h-full">
-            <Card.Root>
-                <Card.Header class="pb-3 border-b bg-muted/10">
-                    <Card.Title
-                        class="text-xs font-bold flex items-center gap-2 uppercase tracking-widest text-muted-foreground"
-                        ><CalendarIcon class="h-4 w-4" /> Calendar</Card.Title
-                    >
-                </Card.Header>
-                <Card.Content class="p-4 flex justify-center">
-                    <Calendar
-                        type="single"
-                        class="rounded-md border-none shadow-none"
-                    />
-                </Card.Content>
-            </Card.Root>
-
-            <Card.Root>
-                <Card.Header class="pb-3 border-b bg-muted/10 space-y-3">
-                    <Card.Title
-                        class="text-xs font-bold flex items-center gap-2 uppercase tracking-widest text-muted-foreground"
-                        ><LayoutGrid class="h-4 w-4" /> Categories</Card.Title
-                    >
-                    <div class="relative">
-                        <Search
-                            class="absolute left-2 top-2.5 h-3 w-3 text-muted-foreground"
-                        />
-                        <Input
-                            placeholder="Search labels..."
-                            bind:value={categorySearch}
-                            class="h-8 pl-7 text-[10px] bg-background shadow-none border-dashed"
+        <section id="developer" class="py-24 px-6">
+            <div class="container mx-auto max-w-4xl">
+                <div
+                    class="rounded-3xl border bg-card p-8 md:p-12 shadow-xl flex flex-col md:flex-row items-center gap-12"
+                >
+                    <div class="shrink-0 relative group">
+                        <div
+                            class="absolute inset-0 bg-primary/20 rounded-full blur-xl group-hover:blur-2xl transition-all"
+                        ></div>
+                        <img
+                            src="https://avatars.githubusercontent.com/u/145318409?v=4"
+                            alt="Federico Matthew"
+                            class="h-40 w-40 rounded-full border-4 border-background shadow-2xl object-cover"
                         />
                     </div>
-                </Card.Header>
-                <Card.Content class="p-0">
-                    <ScrollArea.Root class="max-h-[250px]">
-                        <div class="p-2 space-y-0.5">
-                            {#each filteredCategories as cat}
-                                <button
-                                    class="w-full flex items-center justify-between text-xs p-2.5 hover:bg-muted rounded-md transition-colors font-bold group"
-                                >
-                                    <span class="flex items-center gap-2"
-                                        ><div
-                                            class="h-2 w-2 rounded-full {cat.color}"
-                                        ></div>
-                                        {cat.name}</span
-                                    >
-                                    <Badge
-                                        variant="secondary"
-                                        class="group-hover:bg-primary group-hover:text-primary-foreground text-[10px]"
-                                        >1</Badge
-                                    >
-                                </button>
-                            {/each}
+
+                    <div class="text-center md:text-left space-y-6">
+                        <div>
+                            <h2 class="text-3xl font-bold tracking-tight">
+                                Built by Federico Matthew
+                            </h2>
+                            <p
+                                class="text-primary font-bold mt-1 flex items-center justify-center md:justify-start gap-2"
+                            >
+                                <Code2 class="h-4 w-4" /> Full Stack Developer
+                            </p>
                         </div>
-                    </ScrollArea.Root>
-                </Card.Content>
-            </Card.Root>
-        </div>
-    </div>
-</div>
 
-<Dialog.Root bind:open={isAddDialogOpen}>
-    <Dialog.Content class="sm:max-w-[550px] p-0 overflow-hidden bg-background">
-        <form onsubmit={handleSaveTask}>
-            <div class="p-6 space-y-6">
-                <header>
-                    <Dialog.Title class="text-2xl font-bold"
-                        >{isEditMode ? "Edit Task" : "New Task"}</Dialog.Title
-                    >
-                    <Dialog.Description
-                        >{isEditMode
-                            ? "Update your task details."
-                            : "Create a detailed todo item."}</Dialog.Description
-                    >
-                </header>
-
-                <div class="space-y-5">
-                    <div class="grid gap-2">
-                        <Label
-                            for="title"
-                            class="text-[10px] uppercase font-black text-muted-foreground tracking-widest"
-                            >Title</Label
+                        <p
+                            class="text-muted-foreground text-lg leading-relaxed"
                         >
-                        <Input
-                            id="title"
-                            bind:value={newTask.text}
-                            placeholder="What needs to be done?"
-                            required
-                            class="text-lg font-bold bg-muted/20"
-                        />
-                    </div>
-
-                    <div class="grid gap-2">
-                        <Label
-                            for="desc"
-                            class="text-[10px] uppercase font-black text-muted-foreground tracking-widest"
-                            >Short Description</Label
-                        >
-                        <Input
-                            id="desc"
-                            bind:value={newTask.desc}
-                            placeholder="Dashboard card summary..."
-                            class="bg-muted/10 border-dashed"
-                        />
-                    </div>
-
-                    <div class="grid gap-3">
-                        <Label
-                            class="text-[10px] uppercase font-black text-muted-foreground tracking-widest"
-                            >Labels</Label
-                        >
+                            Hi! I'm an Informatics student at UKDC passionate
+                            about building high-performance web applications.
+                            <b>Koto</b> was created to push the limits of the
+                            <b>Go Fiber</b>
+                            and <b>SvelteKit</b> stack—delivering a tool that is
+                            as robust as it is simple.
+                        </p>
 
                         <div
-                            class="flex flex-wrap gap-2 p-3 bg-muted/20 rounded-xl border border-dashed min-h-14 items-center"
+                            class="flex flex-wrap justify-center md:justify-start gap-2"
                         >
-                            {#each newTask.tags as t}
-                                <Badge
-                                    variant="secondary"
-                                    class="gap-1 pl-2 font-bold uppercase text-[10px] animate-in zoom-in-95"
-                                >
-                                    {t}
-                                    <button
-                                        type="button"
-                                        onclick={() => toggleTag(t)}
-                                        class="hover:text-destructive"
-                                        ><X class="h-3 w-3" /></button
-                                    >
-                                </Badge>
-                            {:else}
-                                <span
-                                    class="text-xs text-muted-foreground/50 italic px-1"
-                                    >Pick from suggestions or type new...</span
+                            {#each techStack as tech}
+                                <Badge variant="secondary" class="px-3 py-1"
+                                    >{tech}</Badge
                                 >
                             {/each}
                         </div>
 
-                        <div class="space-y-2">
-                            <p
-                                class="text-[9px] font-bold text-muted-foreground/70 flex items-center gap-1"
-                            >
-                                <Hash class="h-3 w-3" /> SUGGESTED
-                            </p>
-                            <div class="flex flex-wrap gap-1.5">
-                                {#each categories as cat}
-                                    <button
-                                        type="button"
-                                        onclick={() => toggleTag(cat.name)}
-                                        class="px-2.5 py-1 rounded-full text-[10px] font-bold border transition-all
-                                    {newTask.tags.includes(cat.name)
-                                            ? 'bg-primary text-primary-foreground border-primary shadow-sm'
-                                            : 'bg-background hover:border-primary text-muted-foreground'}"
-                                    >
-                                        {cat.name}
-                                    </button>
-                                {/each}
-                                <div
-                                    class="flex items-center border-l pl-2 ml-1"
-                                >
-                                    <input
-                                        placeholder="+ New Label"
-                                        class="bg-transparent outline-none text-[10px] w-20 font-medium placeholder:italic"
-                                        bind:value={tagInput}
-                                        onkeydown={addCustomTag}
-                                    />
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="grid grid-cols-2 gap-4">
-                        <div class="grid gap-2">
-                            <Label
-                                for="time"
-                                class="text-[10px] uppercase font-black text-muted-foreground"
-                                >Time</Label
-                            >
-                            <Input
-                                id="time"
-                                type="time"
-                                bind:value={newTask.time}
-                                class="bg-muted/10"
-                            />
-                        </div>
-                        <div class="grid gap-2">
-                            <Label
-                                for="priority"
-                                class="text-[10px] uppercase font-black text-muted-foreground"
-                                >Priority</Label
-                            >
-                            <DropdownMenu.Root>
-                                <DropdownMenu.Trigger
-                                    class={buttonVariants({
-                                        variant: "outline",
-                                    }) +
-                                        " w-full !justify-between bg-muted/10 border-input font-normal hover:bg-muted/20 capitalize"}
-                                >
-                                    {newTask.priority}
-                                    <ChevronDown
-                                        class="ml-2 h-4 w-4 opacity-50"
-                                    />
-                                </DropdownMenu.Trigger>
-                                <DropdownMenu.Content
-                                    class="w-[200px] bg-background border shadow-xl"
-                                >
-                                    <DropdownMenu.RadioGroup
-                                        bind:value={newTask.priority}
-                                    >
-                                        <DropdownMenu.RadioItem value="High"
-                                            >High</DropdownMenu.RadioItem
-                                        >
-                                        <DropdownMenu.RadioItem value="Medium"
-                                            >Medium</DropdownMenu.RadioItem
-                                        >
-                                        <DropdownMenu.RadioItem value="Low"
-                                            >Low</DropdownMenu.RadioItem
-                                        >
-                                    </DropdownMenu.RadioGroup>
-                                </DropdownMenu.Content>
-                            </DropdownMenu.Root>
-                        </div>
-                    </div>
-
-                    <div class="grid gap-2">
-                        <Label
-                            for="longDesc"
-                            class="text-[10px] uppercase font-black text-muted-foreground"
-                            >Detailed Description</Label
+                        <div
+                            class="flex justify-center md:justify-start gap-4 pt-2"
                         >
-                        <Textarea
-                            id="longDesc"
-                            bind:value={newTask.longDesc}
-                            placeholder="Full context here..."
-                            rows={4}
-                            class="bg-muted/10 resize-none"
-                        />
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                href="https://github.com/MashuNakamura/todolist-frontend"
+                                target="_blank"
+                                class="gap-2"
+                            >
+                                <Github class="h-4 w-4" /> GitHub
+                            </Button>
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                href="https://www.linkedin.com/in/federico-matthew-pratama-6a388b2a9/"
+                                target="_blank"
+                                class="gap-2"
+                            >
+                                <Linkedin class="h-4 w-4" /> LinkedIn
+                            </Button>
+                        </div>
                     </div>
                 </div>
             </div>
-            <Dialog.Footer class="bg-muted/30 p-6 border-t">
-                <Button
-                    type="button"
-                    variant="outline"
-                    onclick={() => (isAddDialogOpen = false)}
-                >
-                    Cancel
-                </Button>
-                <Button type="submit" class="font-bold shadow-md">
-                    {isEditMode ? "Update Changes" : "Save Task"}
-                </Button>
-            </Dialog.Footer>
-        </form>
-    </Dialog.Content>
-</Dialog.Root>
+        </section>
+    </main>
 
-<Sheet.Root bind:open={isDetailOpen}>
-    <Sheet.Content
-        side="right"
-        class="w-full sm:max-w-xl p-0 flex flex-col border-l-2 bg-background"
-    >
-        {#if selectedTask}
-            <div class="flex-1 overflow-y-auto p-10 space-y-8 mt-4">
-                <header class="space-y-4">
-                    <Badge
-                        class="px-3 py-0.5 text-[10px] font-black {priorityColor(
-                            selectedTask.priority,
-                        )}">{selectedTask.priority} PRIORITY</Badge
-                    >
-                    <Sheet.Title class="text-3xl font-bold tracking-tight"
-                        >{selectedTask.text}</Sheet.Title
-                    >
-                    <div
-                        class="flex items-center gap-4 text-xs font-bold text-muted-foreground uppercase border-y py-4"
-                    >
-                        <span class="flex items-center gap-1.5"
-                            ><CalendarIcon class="h-4 w-4 text-primary" /> Feb 12,
-                            2026</span
-                        >
-                        <span class="flex items-center gap-1.5"
-                            ><Clock class="h-4 w-4 text-primary" />
-                            {selectedTask.time}</span
-                        >
-                    </div>
-                </header>
-
-                {#if selectedTask.longDesc && selectedTask.longDesc !== ""}
-                    <section class="space-y-4">
-                        <div
-                            class="flex items-center gap-2 font-black text-[10px] uppercase tracking-widest text-primary"
-                        >
-                            <AlignLeft class="h-4 w-4" /> Context
-                        </div>
-                        <div
-                            class="text-sm leading-relaxed text-muted-foreground bg-muted/20 p-6 rounded-2xl border-2 border-dashed border-muted italic font-medium"
-                        >
-                            "{selectedTask.longDesc}"
-                        </div>
-                    </section>
-                {/if}
-
-                <section class="space-y-4">
-                    <div
-                        class="flex items-center gap-2 font-black text-[10px] uppercase tracking-widest text-primary"
-                    >
-                        <Tag class="h-4 w-4" /> Labels
-                    </div>
-                    <div class="flex flex-wrap gap-2">
-                        {#each selectedTask.tags as t}
-                            <Badge
-                                variant="secondary"
-                                class="font-bold uppercase text-[10px] border"
-                                >{t}</Badge
-                            >
-                        {:else}
-                            <span class="text-xs text-muted-foreground italic"
-                                >No labels assigned.</span
-                            >
-                        {/each}
-                    </div>
-                </section>
-            </div>
-            <div class="p-6 border-t flex gap-3 bg-muted/5">
-                <Button
-                    variant="outline"
-                    class="flex-1"
-                    onclick={() => (isDetailOpen = false)}
-                >
-                    Close
-                </Button>
-                <Button
-                    class="flex-1 font-bold shadow-md"
-                    onclick={() => openEditDialog(selectedTask)}
-                >
-                    <Edit class="mr-2 h-4 w-4" /> Edit Task
-                </Button>
-            </div>
-        {/if}
-    </Sheet.Content>
-</Sheet.Root>
-
-{#if selectedIds.length > 0}
-    <div class="fixed bottom-8 left-1/2 -translate-x-1/2 z-50">
+    <footer class="py-12 px-6 border-t bg-muted/10">
         <div
-            class="bg-primary text-primary-foreground px-4 md:px-6 py-3 rounded-full shadow-2xl flex items-center gap-4 border border-white/10"
+            class="max-w-6xl mx-auto flex flex-col md:flex-row justify-between items-center gap-6"
         >
-            <span class="text-xs md:text-sm font-bold tracking-tight uppercase"
-                >{selectedIds.length} Selected</span
+            <div class="flex items-center gap-2 opacity-50">
+                <span class="font-bold text-sm"
+                    >Federico Matthew &copy; 2026</span
+                >
+            </div>
+            <div
+                class="flex gap-6 text-xs font-bold text-muted-foreground uppercase tracking-widest"
             >
-            <Separator
-                orientation="vertical"
-                class="h-4 bg-primary-foreground/30"
-            />
-            <Button
-                variant="secondary"
-                size="sm"
-                class="h-8 rounded-full font-bold px-4 text-[10px] md:text-xs text-primary bg-white"
-                onclick={bulkMarkDone}
-            >
-                <Check class="mr-2 h-3 w-3" /> Mark Done
-            </Button>
-            <Button
-                variant="destructive"
-                size="sm"
-                class="h-8 rounded-full font-black px-4 text-[10px] md:text-xs"
-                onclick={() => {
-                    // Logic delete bulk manual kalau api bulk delete belum ada
-                    // Tapi di script atas saya sudah pake updateStatus 'done'
-                    // Kalau mau delete beneran:
-                    selectedIds.forEach((id) => deleteTask(id));
-                    selectedIds = [];
-                }}>Delete All</Button
-            >
+                <a href="/privacy" class="hover:text-foreground">Privacy</a>
+                <a href="/terms" class="hover:text-foreground">Terms</a>
+                <a
+                    href="mailto:federicomatthewpratamaa@gmail.com"
+                    class="hover:text-foreground">Contact</a
+                >
+            </div>
         </div>
-    </div>
-{/if}
+    </footer>
+</div>
+
+<style>
+    .perspective-1000 {
+        perspective: 1000px;
+    }
+    .rotate-x-12 {
+        transform: rotateX(12deg);
+    }
+</style>

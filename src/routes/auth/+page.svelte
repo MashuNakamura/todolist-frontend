@@ -13,6 +13,7 @@
     let name = $state("");
     let email = $state("");
     let password = $state("");
+    let confirmPassword = $state("");
     let otp = $state("");
 
     async function handleLogin(e: Event) {
@@ -53,13 +54,18 @@
         e.preventDefault();
         isLoading = true;
         try {
-            if (!name || !email || !password) {
+            if (!name || !email || !password || !confirmPassword) {
                 toast.error("Please fill in all fields");
                 return;
             }
 
             if (!email.includes("@")) {
                 toast.error("Please enter a valid email");
+                return;
+            }
+
+            if (password !== confirmPassword) {
+                toast.error("Passwords do not match");
                 return;
             }
 
@@ -84,7 +90,7 @@
             const res = await authService.forgotPassword({ email });
             if (res.success) {
                 toast.success("OTP sent to your email!");
-                view = "reset"; // Pindah ke input OTP
+                view = "reset";
             } else {
                 toast.error(res.message || "Failed to send OTP");
             }
@@ -223,6 +229,15 @@
                             id="password"
                             type="password"
                             bind:value={password}
+                            required
+                        />
+                    </div>
+                    <div class="space-y-2">
+                        <Label for="confirm-password">Confirm Password</Label>
+                        <Input
+                            id="confirm-password"
+                            type="password"
+                            bind:value={confirmPassword}
                             required
                         />
                     </div>

@@ -2,12 +2,6 @@
 	import "../app.css";
 	import { ModeWatcher } from "mode-watcher";
 	import { Toaster } from "$lib/components/ui/sonner";
-	import {
-		SidebarProvider,
-		SidebarTrigger,
-	} from "$lib/components/ui/sidebar";
-	import { Separator } from "$lib/components/ui/separator";
-	import AppSidebar from "$lib/components/ui/AppSidebar.svelte";
 	import { authService } from "$lib/services/authService";
 	import { onMount } from "svelte";
 	import { goto } from "$app/navigation";
@@ -20,6 +14,8 @@
 	let isAuthenticated = $state(false);
 	let isChecking = $state(true);
 
+	// Safe to use derived here
+	let isDashboard = $derived($page.url.pathname.startsWith("/dashboard"));
 	let isAuthPage = $derived($page.url.pathname.startsWith("/auth"));
 
 	onMount(async () => {
@@ -30,20 +26,46 @@
 			if (res.success) {
 				user = res.data;
 				isAuthenticated = true;
-				if (isAuthPage || $page.url.pathname === "/") {
-					goto("/tasks");
+
+				// If logged in and on auth page, go to dashboard
+				if ($page.url.pathname.startsWith("/auth")) {
+					goto("/dashboard");
 				}
 			} else {
-				localStorage.removeItem("token");
-				isAuthenticated = false;
-				if (!isAuthPage) goto("/auth");
+				// Invalid token
+				handleLogout();
 			}
 		} else {
-			isAuthenticated = false;
-			if (!isAuthPage) goto("/auth");
+			// No token
+			handleLogout();
 		}
 
 		isChecking = false;
+	});
+
+	function handleLogout() {
+		localStorage.removeItem("token");
+		isAuthenticated = false;
+		user = undefined;
+		// If on dashboard (protected), go to auth
+		if ($page.url.pathname.startsWith("/dashboard")) {
+			goto("/auth");
+		}
+	}
+
+	// Reactive check for route changes after initial load
+	$effect(() => {
+		if (!isChecking) {
+			if (isAuthenticated && $page.url.pathname.startsWith("/auth")) {
+				goto("/dashboard");
+			}
+			if (
+				!isAuthenticated &&
+				$page.url.pathname.startsWith("/dashboard")
+			) {
+				goto("/auth");
+			}
+		}
 	});
 </script>
 
@@ -51,27 +73,9 @@
 <Toaster />
 
 {#if isChecking}
-	<div class="h-screen w-full bg-background"></div>
-{:else if !isAuthPage && isAuthenticated && user}
-	<SidebarProvider>
-		<AppSidebar />
-
-		<main class="flex flex-1 flex-col overflow-hidden">
-			<header class="flex h-16 shrink-0 items-center gap-2 border-b px-6">
-				<div class="flex items-center gap-2">
-					<SidebarTrigger class="-ml-1 h-9 w-9 md:h-8 md:w-8" />
-					<Separator orientation="vertical" class="mr-2 h-4" />
-					<span class="text-sm font-medium text-muted-foreground">
-						{user.name}'s Todo
-					</span>
-				</div>
-			</header>
-
-			<div class="flex flex-1 flex-col gap-4 p-6 overflow-y-auto">
-				{@render children()}
-			</div>
-		</main>
-	</SidebarProvider>
+	<div class="flex h-screen w-full items-center justify-center bg-background">
+		<!-- Simple Loading Spinner or Text -->
+	</div>
 {:else}
 	{@render children()}
 {/if}
