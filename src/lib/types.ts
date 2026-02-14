@@ -1,7 +1,43 @@
 export interface APIResponse<T> {
     success: boolean;
     message: string;
-    data: T;
+    data?: T;
+    error?: number;
+}
+
+export interface UserData {
+    token: string;
+    user: {
+        id: number;
+        name: string;
+        email: string;
+    };
+}
+
+export interface LoginPayload {
+    email: string;
+    password: string;
+}
+
+export interface RegisterPayload {
+    email: string;
+    password: string;
+    name: string;
+}
+
+export interface ForgotPasswordPayload {
+    email: string;
+}
+
+export interface ResetPasswordPayload {
+    email: string;
+    otp: string;
+    password: string;
+}
+
+export interface ChangePasswordPayload {
+    old_password: string;
+    new_password: string;
 }
 
 export interface Task {

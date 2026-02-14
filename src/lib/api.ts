@@ -1,6 +1,52 @@
 import type { Task, APIResponse, Category } from "./types";
 
-const API_URL = "http://localhost:8080/api";
+import { PUBLIC_API_URL } from '$env/static/public';
+
+const getHeaders = () => {
+    const token = localStorage.getItem("token");
+    return {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {})
+    };
+};
+
+export const client = {
+    post: async (path: string, body: any) => {
+        const res = await fetch(`${PUBLIC_API_URL}${path}`, {
+            method: "POST",
+            headers: getHeaders(),
+            body: JSON.stringify(body),
+        });
+        return res.json();
+    },
+
+    get: async (path: string) => {
+        const res = await fetch(`${PUBLIC_API_URL}${path}`, {
+            headers: getHeaders(),
+        });
+        return res.json();
+    },
+
+    put: async (path: string, body: any) => {
+        const res = await fetch(`${PUBLIC_API_URL}${path}`, {
+            method: "PUT",
+            headers: getHeaders(),
+            body: JSON.stringify(body),
+        });
+        return res.json();
+    },
+
+    delete: async (path: string, body?: any) => {
+        const res = await fetch(`${PUBLIC_API_URL}${path}`, {
+            method: "DELETE",
+            headers: getHeaders(),
+            body: body ? JSON.stringify(body) : undefined,
+        });
+        return res.json();
+    }
+};
+
+// CLEAN
 
 const getAuthHeaders = () => {
     const token = localStorage.getItem("token");
@@ -22,54 +68,6 @@ const getUserIdFromToken = () => {
 }
 
 export const api = {
-    // --- AUTH API ---
-    login: async (email: string, password: string) => {
-        const response = await fetch(`${API_URL}/login`, {
-            method: "POST",
-            headers: getAuthHeaders(),
-            body: JSON.stringify({ email, password }),
-        });
-        return await response.json();
-    },
-
-    register: async (name: string, email: string, password: string) => {
-        const response = await fetch(`${API_URL}/register`, {
-            method: "POST",
-            headers: getAuthHeaders(),
-            body: JSON.stringify({ name, email, password }),
-        });
-        return await response.json();
-    },
-
-    forgotPassword: async (email: string) => {
-        const response = await fetch(`${API_URL}/forgot-password`, {
-            method: "POST",
-            headers: getAuthHeaders(),
-            body: JSON.stringify({ email }),
-        });
-        return await response.json();
-    },
-
-    resetPassword: async (email: string, otp: string, password: string) => {
-        const response = await fetch(`${API_URL}/reset-password`, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-            },
-            body: JSON.stringify({ email, otp, password }),
-        });
-        return await response.json();
-    },
-
-    changePassword: async (old_password: string, new_password: string) => {
-        const response = await fetch(`${API_URL}/change-password`, {
-            method: "POST",
-            headers: getAuthHeaders(),
-            body: JSON.stringify({ old_password, new_password }),
-        });
-        return await response.json();
-    },
-
     // --- TASK API ---
     createTask: async (task: Partial<Task>) => {
         const payload = {
@@ -82,7 +80,7 @@ export const api = {
             status: task.status
         }
 
-        const response = await fetch(`${API_URL}/tasks`, {
+        const response = await fetch(`${PUBLIC_API_URL}/tasks`, {
             method: "POST",
             headers: getAuthHeaders(),
             body: JSON.stringify(payload),
@@ -92,7 +90,7 @@ export const api = {
 
     getTasks: async () => {
         const userId = getUserIdFromToken();
-        const response = await fetch(`${API_URL}/tasks/user/${userId}`, {
+        const response = await fetch(`${PUBLIC_API_URL}/tasks/user/${userId}`, {
             headers: getAuthHeaders(),
         });
         const json: APIResponse<Task[]> = await response.json();
@@ -100,13 +98,13 @@ export const api = {
     },
 
     getTaskById: async (id: number) => {
-        const response = await fetch(`${API_URL}/tasks/${id}`, {
+        const response = await fetch(`${PUBLIC_API_URL}/tasks/${id}`, {
             headers: getAuthHeaders(),
         });
         return await response.json();
     },
 
-    updateTask: async (task: Task) => {
+    updateTask: async (id: number, task: any) => {
         const payload = {
             title: task.title,
             short_desc: task.short_desc,
@@ -118,7 +116,7 @@ export const api = {
             tags: task.tags
         }
 
-        const response = await fetch(`${API_URL}/tasks/${task.ID}`, {
+        const response = await fetch(`${PUBLIC_API_URL}/tasks/${task.ID}`, {
             method: "PUT",
             headers: getAuthHeaders(),
             body: JSON.stringify(payload),
@@ -127,7 +125,7 @@ export const api = {
     },
 
     deleteTask: async (ids: number[]) => {
-        const response = await fetch(`${API_URL}/tasks`, {
+        const response = await fetch(`${PUBLIC_API_URL}/tasks`, {
             method: "DELETE",
             headers: getAuthHeaders(),
             body: JSON.stringify({ ids })
@@ -136,7 +134,7 @@ export const api = {
     },
 
     updateStatus: async (ids: number[], status: string) => {
-        const res = await fetch(`${API_URL}/tasks/status`, {
+        const res = await fetch(`${PUBLIC_API_URL}/tasks/status`, {
             method: "PUT",
             headers: getAuthHeaders(),
             body: JSON.stringify({ ids, status })
@@ -146,7 +144,7 @@ export const api = {
 
     // Category API
     createCategory: async (name: string, color: string) => {
-        const response = await fetch(`${API_URL}/categories`, {
+        const response = await fetch(`${PUBLIC_API_URL}/categories`, {
             method: "POST",
             headers: getAuthHeaders(),
             body: JSON.stringify({ name, color }),
@@ -156,7 +154,7 @@ export const api = {
 
     getCategories: async () => {
         const userId = getUserIdFromToken();
-        const response = await fetch(`${API_URL}/categories/user/${userId}`, {
+        const response = await fetch(`${PUBLIC_API_URL}/categories/user/${userId}`, {
             headers: getAuthHeaders(),
         });
         const json: APIResponse<Category[]> = await response.json();
@@ -164,7 +162,7 @@ export const api = {
     },
 
     updateCategory: async (id: number, name: string, color: string) => {
-        const response = await fetch(`${API_URL}/categories/${id}`, {
+        const response = await fetch(`${PUBLIC_API_URL}/categories/${id}`, {
             method: "PUT",
             headers: getAuthHeaders(),
             body: JSON.stringify({ name, color }),
@@ -173,7 +171,7 @@ export const api = {
     },
 
     deleteCategory: async (id: number) => {
-        const response = await fetch(`${API_URL}/categories/${id}`, {
+        const response = await fetch(`${PUBLIC_API_URL}/categories/${id}`, {
             method: "DELETE",
             headers: getAuthHeaders(),
         });

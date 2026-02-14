@@ -14,6 +14,7 @@
     import { Separator } from "$lib/components/ui/separator";
     import * as Progress from "$lib/components/ui/progress";
     import { Calendar } from "$lib/components/ui/calendar";
+    import { Skeleton } from "$lib/components/ui/skeleton";
     import {
         Plus,
         Edit,
@@ -30,67 +31,17 @@
         Search,
         Trash2,
         Eye,
-        Save,
         X,
         Hash,
     } from "lucide-svelte";
     import { toast } from "svelte-sonner";
+    import { onMount } from "svelte";
+    import { api, type Task } from "$lib";
 
-    // --- 1. DATA & STATE ---
-    let tasks = $state([
-        {
-            id: 1,
-            text: "Setup Project SvelteKit",
-            desc: "Initialize bun and git",
-            done: true,
-            tags: ["Dev", "Urgent"],
-            priority: "High",
-            time: "09:00",
-            longDesc: "Install SvelteKit using Bun and setup Tailwind v4.",
-        },
-        {
-            id: 2,
-            text: "Integrate Shadcn UI",
-            desc: "Install themes and components",
-            done: true,
-            tags: ["UI"],
-            priority: "Medium",
-            time: "11:00",
-            longDesc: "Add components and themes.",
-        },
-        {
-            id: 3,
-            text: "Build Go Fiber Backend",
-            desc: "Create boilerplate API",
-            done: false,
-            tags: ["Backend", "Go"],
-            priority: "High",
-            time: "14:00",
-            longDesc: "Setup Fiber server and database connections.",
-        },
-        {
-            id: 4,
-            text: "Database Schema Design",
-            desc: "Define tables and relations",
-            done: false,
-            tags: ["Database"],
-            priority: "Medium",
-            time: "15:30",
-            longDesc: "Create ERD for the todo application.",
-        },
-        {
-            id: 5,
-            text: "Authentication Flow",
-            desc: "Implement login and register",
-            done: false,
-            tags: ["Auth"],
-            priority: "High",
-            time: "17:00",
-            longDesc: "Connect frontend with Supabase Auth.",
-        },
-    ]);
+    // Task State
+    let tasks = $state<Task[]>([]);
 
-    // Dummy categories (Akan di-fetch dari DB nantinya)
+    // Category State (Dummy)
     let categories = $state([
         { name: "Dev", color: "bg-blue-500" },
         { name: "UI", color: "bg-pink-500" },
@@ -117,8 +68,41 @@
     let isAddDialogOpen = $state(false);
     let isEditMode = $state(false);
     let editingTaskId = $state<number | null>(null);
+    let isLoading = $state(true);
 
-    // --- 2. LOGIC: PAGINATION ---
+    // Fetch Tasks on Mount
+    onMount(async () => {
+        try {
+            isLoading = true;
+            const token = localStorage.getItem("token");
+            if (!token) {
+                window.location.href = "/login";
+                return;
+            }
+
+            const fetchTasks = await api.getTasks();
+
+            tasks = fetchTasks.map((task: any) => ({
+                ID: task.ID,
+                title: task.title,
+                short_desc: task.short_desc,
+                long_desc: task.long_desc,
+                priority: task.priority,
+                time: task.time,
+                tags: task.tags || [],
+                status: task.status,
+                date: task.date,
+                user_id: task.user_id,
+            }));
+        } catch (error) {
+            console.error("Error fetching tasks:", error);
+            toast.error("Failed to load tasks");
+        } finally {
+            isLoading = false;
+        }
+    });
+
+    // Pagination & Filter Logic
     let currentPage = $state(1);
     let perPage = 5;
     const count = $derived(tasks.length);
@@ -126,16 +110,160 @@
         tasks.slice((currentPage - 1) * perPage, currentPage * perPage),
     );
 
-    // --- 3. LOGIC: FILTER & PROGRESS ---
     const filteredCategories = $derived(
         categories.filter((cat) =>
             cat.name.toLowerCase().includes(categorySearch.toLowerCase()),
         ),
     );
-    const completedCount = $derived(tasks.filter((t) => t.done).length);
-    const progressPercent = $derived((completedCount / tasks.length) * 100);
+    const completedCount = $derived(
+        tasks.filter((t) => t.status === "done").length,
+    );
+    const progressPercent = $derived(
+        tasks.length > 0 ? (completedCount / tasks.length) * 100 : 0,
+    );
 
-    // --- 4. HANDLERS ---
+    // CRUD Handlers
+
+    // SAVE (CREATE / UPDATE)
+    async function handleSaveTask(e: Event) {
+        e.preventDefault();
+
+        // Siapkan Payload buat Backend (pake any biar TS gak rewel)
+        const payload: any = {
+            title: newTask.text,
+            short_desc: newTask.desc,
+            long_desc: newTask.longDesc,
+            priority: newTask.priority,
+            time: newTask.time,
+            tags: newTask.tags,
+            status: "todo",
+        };
+
+        try {
+            if (isEditMode && editingTaskId) {
+                // UPDATE
+                const res = await api.updateTask(editingTaskId, payload);
+                if (res.success) {
+                    const index = tasks.findIndex(
+                        (t) => t.ID === editingTaskId,
+                    );
+                    if (index !== -1) {
+                        // Update local state
+                        tasks[index] = {
+                            ...tasks[index],
+                            title: payload.title,
+                            short_desc: payload.short_desc,
+                            long_desc: payload.long_desc,
+                            priority: payload.priority,
+                            time: payload.time,
+                            tags: payload.tags,
+                        };
+                    }
+                    toast.success("Task updated!");
+                } else {
+                    toast.error("Update failed: " + res.message);
+                }
+            } else {
+                // --- CREATE ---
+                const res = await api.createTask(payload);
+                if (res.success) {
+                    const newItem = res.data; // Data asli dari DB
+                    tasks.push({
+                        ID: newItem.ID,
+                        title: newItem.Title,
+                        short_desc: newItem.ShortDesc,
+                        long_desc: newItem.LongDesc,
+                        priority: newItem.Priority,
+                        time: newItem.Time,
+                        tags: newItem.Tags || [],
+                        status: newItem.Status,
+                        date: newItem.Date,
+                        user_id: newItem.UserID,
+                    });
+                    toast.success("Task created!");
+                } else {
+                    toast.error("Create failed: " + res.message);
+                }
+            }
+
+            // Reset Form
+            newTask = {
+                text: "",
+                desc: "",
+                longDesc: "",
+                priority: "Medium",
+                time: "09:00",
+                tags: [],
+            };
+            isAddDialogOpen = false;
+            isEditMode = false;
+            editingTaskId = null;
+        } catch (error) {
+            console.error("Error saving task:", error);
+            toast.error("Failed to save task");
+        }
+    }
+
+    // DELETE SINGLE
+    async function deleteTask(id: number) {
+        if (!confirm("Delete this task?")) return;
+
+        try {
+            const res = await api.deleteTask([id]);
+            if (res.success) {
+                tasks = tasks.filter((t) => t.ID !== id);
+                toast.success("Task deleted");
+            } else {
+                toast.error("Failed delete");
+            }
+        } catch (error) {
+            toast.error("Error deleting");
+        }
+    }
+
+    // DELETE BULK (Mark Done / Delete Selected)
+    async function bulkMarkDone() {
+        try {
+            const res = await api.updateStatus(selectedIds, "done");
+            if (res.success) {
+                tasks = tasks.map((t) => {
+                    if (selectedIds.includes(t.ID)) {
+                        return { ...t, status: "done" };
+                    }
+                    return t;
+                });
+                selectedIds = [];
+                toast.success("Selected tasks marked as done");
+            }
+        } catch (error) {
+            toast.error("Failed bulk update");
+        }
+    }
+
+    // TOGGLE DONE (Update Status Single)
+    async function toggleDone(task: any) {
+        const newStatus = task.done ? "todo" : "done";
+        try {
+            const res = await api.updateTask(task.ID, {
+                status: newStatus,
+            } as any);
+            if (res.success) {
+                const index = tasks.findIndex((t) => t.ID === task.ID);
+                if (index !== -1) {
+                    tasks[index].status = newStatus;
+                    toast.success(
+                        tasks[index].status === "done"
+                            ? "Marked as done"
+                            : "Marked as undone",
+                    );
+                }
+            }
+        } catch (error) {
+            toast.error("Failed to update status");
+        }
+    }
+
+    // --- UI HELPERS ---
     function openDetail(task: any) {
         selectedTask = task;
         isDetailOpen = true;
@@ -153,38 +281,9 @@
             tags: [...task.tags],
         };
         isAddDialogOpen = true;
-        isDetailOpen = false; // Close detail view
+        isDetailOpen = false;
     }
 
-    function deleteTask(id: number) {
-        tasks = tasks.filter((t) => t.id !== id);
-        toast.error("Task deleted");
-    }
-
-    function toggleDone(task: any) {
-        const index = tasks.findIndex((t) => t.id === task.id);
-        if (index !== -1) {
-            tasks[index].done = !tasks[index].done;
-            toast.success(
-                tasks[index].done
-                    ? "Task marked as done"
-                    : "Task marked as undone",
-            );
-        }
-    }
-
-    function bulkMarkDone() {
-        tasks = tasks.map((t) => {
-            if (selectedIds.includes(t.id)) {
-                return { ...t, done: true };
-            }
-            return t;
-        });
-        selectedIds = [];
-        toast.success("Selected tasks marked as done");
-    }
-
-    // Toggle Tag: Tambah jika belum ada, hapus jika sudah ada
     function toggleTag(tagName: string) {
         if (newTask.tags.includes(tagName)) {
             newTask.tags = newTask.tags.filter((t) => t !== tagName);
@@ -201,62 +300,6 @@
             }
             tagInput = "";
         }
-    }
-
-    function handleSaveTask(e: Event) {
-        e.preventDefault();
-
-        if (isEditMode && editingTaskId) {
-            // Edit Mode
-            const index = tasks.findIndex((t) => t.id === editingTaskId);
-            if (index !== -1) {
-                const original = tasks[index];
-                const updated = {
-                    ...original,
-                    ...newTask,
-                };
-
-                // Check for changes
-                const hasChanges =
-                    original.text !== updated.text ||
-                    original.desc !== updated.desc ||
-                    original.longDesc !== updated.longDesc ||
-                    original.priority !== updated.priority ||
-                    original.time !== updated.time ||
-                    JSON.stringify(original.tags) !==
-                        JSON.stringify(updated.tags);
-
-                if (!hasChanges) {
-                    toast.info("No changes detected");
-                    isAddDialogOpen = false;
-                    return;
-                }
-
-                tasks[index] = updated;
-                toast.success("Saved changes");
-            }
-        } else {
-            // Add Mode
-            tasks.push({
-                id: Date.now(),
-                ...newTask,
-                done: false,
-            });
-            toast.success("Task added to list");
-        }
-
-        // Reset state
-        newTask = {
-            text: "",
-            desc: "",
-            longDesc: "",
-            priority: "Medium",
-            time: "09:00",
-            tags: [],
-        };
-        isAddDialogOpen = false;
-        isEditMode = false;
-        editingTaskId = null;
     }
 
     const priorityColor = (p: string) => {
@@ -346,139 +389,162 @@
             </Card.Root>
 
             <div class="flex flex-col gap-3 flex-1">
-                {#each paginatedTasks as task (task.id)}
-                    <Card.Root
-                        class="group transition-all {task.done
-                            ? 'bg-muted/40 opacity-70'
-                            : 'bg-card'}"
-                    >
-                        <Card.Content class="p-0 flex items-stretch">
-                            <div
-                                class="px-3 md:px-4 flex items-center border-r shrink-0"
-                            >
-                                <Checkbox
-                                    checked={selectedIds.includes(task.id)}
-                                    onCheckedChange={(v) => {
-                                        if (v)
-                                            selectedIds = [
-                                                ...selectedIds,
-                                                task.id,
-                                            ];
-                                        else
-                                            selectedIds = selectedIds.filter(
-                                                (id) => id !== task.id,
-                                            );
-                                    }}
-                                />
+                {#if isLoading}
+                    {#each Array(5) as _}
+                        <div
+                            class="flex items-center space-x-4 p-4 border rounded-xl bg-card"
+                        >
+                            <Skeleton class="h-5 w-5 rounded-md" />
+                            <div class="space-y-2 flex-1">
+                                <Skeleton class="h-4 w-[60%]" />
+                                <Skeleton class="h-3 w-[40%]" />
                             </div>
-                            <button
-                                type="button"
-                                class="flex-1 p-3 md:p-4 text-left focus:outline-none flex items-center justify-between gap-4 min-w-0"
-                                onclick={() => openDetail(task)}
-                            >
-                                <div class="flex-1 min-w-0">
-                                    <div class="flex items-center gap-2 mb-1">
-                                        <h3
-                                            class="text-sm md:text-base font-semibold truncate {task.done
-                                                ? 'line-through text-muted-foreground'
-                                                : ''}"
-                                        >
-                                            {task.text}
-                                        </h3>
-                                        <div class="flex gap-1 shrink-0">
-                                            {#each task.tags.slice(0, 1) as t}
-                                                <Badge
-                                                    variant="secondary"
-                                                    class="text-[8px] px-1.5 h-4 font-bold uppercase"
-                                                    >{t}</Badge
-                                                >
-                                            {/each}
-                                        </div>
-                                        {#if task.longDesc}
-                                            <AlignLeft
-                                                class="h-3 w-3 text-muted-foreground/50 ml-1"
-                                            />
-                                        {/if}
-                                    </div>
-                                    {#if task.desc}
-                                        <p
-                                            class="text-muted-foreground text-[10px] md:text-xs italic line-clamp-1"
-                                        >
-                                            "{task.desc}"
-                                        </p>
-                                    {/if}
-                                </div>
+                            <Skeleton class="h-8 w-8 rounded-full" />
+                        </div>
+                    {/each}
+                {:else}
+                    {#each paginatedTasks as task (task.ID)}
+                        <Card.Root
+                            class="group transition-all {task.status === 'done'
+                                ? 'bg-muted/40 opacity-70'
+                                : 'bg-card'}"
+                        >
+                            <Card.Content class="p-0 flex items-stretch">
                                 <div
-                                    class="w-[85px] md:w-[120px] flex items-center justify-between shrink-0 border-l pl-3 md:pl-4"
+                                    class="px-3 md:px-4 flex items-center border-r shrink-0"
                                 >
-                                    <div
-                                        class="flex flex-col items-center gap-1 w-full"
-                                    >
-                                        <Badge
-                                            variant="outline"
-                                            class="font-bold text-[8px] md:text-[9px] uppercase {priorityColor(
-                                                task.priority,
-                                            )}">{task.priority}</Badge
-                                        >
-                                        <div
-                                            class="flex items-center gap-1 text-[9px] text-muted-foreground font-bold font-mono"
-                                        >
-                                            <Clock class="h-3 w-3" />
-                                            {task.time}
-                                        </div>
-                                    </div>
-                                    <ChevronRight
-                                        class="h-4 w-4 text-muted-foreground hidden md:block opacity-0 group-hover:opacity-100 transition-opacity ml-1"
+                                    <Checkbox
+                                        checked={selectedIds.includes(task.ID)}
+                                        onCheckedChange={(v) => {
+                                            if (v)
+                                                selectedIds = [
+                                                    ...selectedIds,
+                                                    task.ID,
+                                                ];
+                                            else
+                                                selectedIds =
+                                                    selectedIds.filter(
+                                                        (id) => id !== task.ID,
+                                                    );
+                                        }}
                                     />
                                 </div>
-                            </button>
-                            <div
-                                class="pr-2 flex items-center border-l md:border-none"
-                            >
-                                <DropdownMenu.Root>
-                                    <DropdownMenu.Trigger
-                                        ><Button
-                                            variant="ghost"
-                                            size="icon"
-                                            class="h-8 w-8 rounded-full"
-                                            ><MoreVertical
-                                                class="h-4 w-4"
-                                            /></Button
-                                        ></DropdownMenu.Trigger
+                                <button
+                                    type="button"
+                                    class="flex-1 p-3 md:p-4 text-left focus:outline-none flex items-center justify-between gap-4 min-w-0"
+                                    onclick={() => openDetail(task)}
+                                >
+                                    <div class="flex-1 min-w-0">
+                                        <div
+                                            class="flex items-center gap-2 mb-1"
+                                        >
+                                            <h3
+                                                class="text-sm md:text-base font-semibold truncate {task.status ===
+                                                'done'
+                                                    ? 'line-through text-muted-foreground'
+                                                    : ''}"
+                                            >
+                                                {task.title}
+                                            </h3>
+                                            <div class="flex gap-1 shrink-0">
+                                                {#each task.tags.slice(0, 1) as t}
+                                                    <Badge
+                                                        variant="secondary"
+                                                        class="text-[8px] px-1.5 h-4 font-bold uppercase"
+                                                        >{t}</Badge
+                                                    >
+                                                {/each}
+                                            </div>
+                                            {#if task.long_desc}
+                                                <AlignLeft
+                                                    class="h-3 w-3 text-muted-foreground/50 ml-1"
+                                                />
+                                            {/if}
+                                        </div>
+                                        {#if task.short_desc}
+                                            <p
+                                                class="text-muted-foreground text-[10px] md:text-xs italic line-clamp-1"
+                                            >
+                                                "{task.short_desc}"
+                                            </p>
+                                        {/if}
+                                    </div>
+                                    <div
+                                        class="w-[85px] md:w-[120px] flex items-center justify-between shrink-0 border-l pl-3 md:pl-4"
                                     >
-                                    <DropdownMenu.Content
-                                        align="end"
-                                        class="w-40"
-                                    >
-                                        <DropdownMenu.Item
-                                            onclick={() => openDetail(task)}
-                                            ><Eye class="mr-2 h-4 w-4" /> View Details</DropdownMenu.Item
+                                        <div
+                                            class="flex flex-col items-center gap-1 w-full"
                                         >
-                                        <DropdownMenu.Item
-                                            onclick={() => openEditDialog(task)}
-                                            ><Edit class="mr-2 h-4 w-4" /> Edit Task</DropdownMenu.Item
+                                            <Badge
+                                                variant="outline"
+                                                class="font-bold text-[8px] md:text-[9px] uppercase {priorityColor(
+                                                    task.priority,
+                                                )}">{task.priority}</Badge
+                                            >
+                                            <div
+                                                class="flex items-center gap-1 text-[9px] text-muted-foreground font-bold font-mono"
+                                            >
+                                                <Clock class="h-3 w-3" />
+                                                {task.time}
+                                            </div>
+                                        </div>
+                                        <ChevronRight
+                                            class="h-4 w-4 text-muted-foreground hidden md:block opacity-0 group-hover:opacity-100 transition-opacity ml-1"
+                                        />
+                                    </div>
+                                </button>
+                                <div
+                                    class="pr-2 flex items-center border-l md:border-none"
+                                >
+                                    <DropdownMenu.Root>
+                                        <DropdownMenu.Trigger
+                                            ><Button
+                                                variant="ghost"
+                                                size="icon"
+                                                class="h-8 w-8 rounded-full"
+                                                ><MoreVertical
+                                                    class="h-4 w-4"
+                                                /></Button
+                                            ></DropdownMenu.Trigger
                                         >
-                                        <DropdownMenu.Item
-                                            onclick={() => toggleDone(task)}
+                                        <DropdownMenu.Content
+                                            align="end"
+                                            class="w-40"
                                         >
-                                            <Check class="mr-2 h-4 w-4" />
-                                            {task.done
-                                                ? "Mark as Undone"
-                                                : "Mark as Done"}
-                                        </DropdownMenu.Item>
-                                        <DropdownMenu.Separator />
-                                        <DropdownMenu.Item
-                                            class="text-destructive font-bold"
-                                            onclick={() => deleteTask(task.id)}
-                                            ><Trash2 class="mr-2 h-4 w-4" /> Delete
-                                            Task</DropdownMenu.Item
-                                        >
-                                    </DropdownMenu.Content>
-                                </DropdownMenu.Root>
-                            </div>
-                        </Card.Content>
-                    </Card.Root>
-                {/each}
+                                            <DropdownMenu.Item
+                                                onclick={() => openDetail(task)}
+                                                ><Eye class="mr-2 h-4 w-4" /> View
+                                                Details</DropdownMenu.Item
+                                            >
+                                            <DropdownMenu.Item
+                                                onclick={() =>
+                                                    openEditDialog(task)}
+                                                ><Edit class="mr-2 h-4 w-4" /> Edit
+                                                Task</DropdownMenu.Item
+                                            >
+                                            <DropdownMenu.Item
+                                                onclick={() => toggleDone(task)}
+                                            >
+                                                <Check class="mr-2 h-4 w-4" />
+                                                {task.status
+                                                    ? "Mark as Undone"
+                                                    : "Mark as Done"}
+                                            </DropdownMenu.Item>
+                                            <DropdownMenu.Separator />
+                                            <DropdownMenu.Item
+                                                class="text-destructive font-bold"
+                                                onclick={() =>
+                                                    deleteTask(task.ID)}
+                                                ><Trash2 class="mr-2 h-4 w-4" />
+                                                Delete Task</DropdownMenu.Item
+                                            >
+                                        </DropdownMenu.Content>
+                                    </DropdownMenu.Root>
+                                </div>
+                            </Card.Content>
+                        </Card.Root>
+                    {/each}
+                {/if}
             </div>
 
             <div
@@ -636,7 +702,7 @@
                                         type="button"
                                         onclick={() => toggleTag(cat.name)}
                                         class="px-2.5 py-1 rounded-full text-[10px] font-bold border transition-all
-                                        {newTask.tags.includes(cat.name)
+                                    {newTask.tags.includes(cat.name)
                                             ? 'bg-primary text-primary-foreground border-primary shadow-sm'
                                             : 'bg-background hover:border-primary text-muted-foreground'}"
                                     >
@@ -852,9 +918,11 @@
                 size="sm"
                 class="h-8 rounded-full font-black px-4 text-[10px] md:text-xs"
                 onclick={() => {
-                    tasks = tasks.filter((t) => !selectedIds.includes(t.id));
+                    // Logic delete bulk manual kalau api bulk delete belum ada
+                    // Tapi di script atas saya sudah pake updateStatus 'done'
+                    // Kalau mau delete beneran:
+                    selectedIds.forEach((id) => deleteTask(id));
                     selectedIds = [];
-                    toast.error("Tasks deleted");
                 }}>Delete All</Button
             >
         </div>
