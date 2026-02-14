@@ -40,6 +40,10 @@ export interface ChangePasswordPayload {
     new_password: string;
 }
 
+export interface UserProfile {
+    name: string;
+}
+
 export interface Task {
     ID: number;
     title: string;

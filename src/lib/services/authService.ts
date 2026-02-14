@@ -1,5 +1,5 @@
 import { client } from "$lib/api";
-import type { APIResponse, UserData, LoginPayload, RegisterPayload, ForgotPasswordPayload, ResetPasswordPayload, ChangePasswordPayload } from '@/types';
+import type { APIResponse, UserData, LoginPayload, RegisterPayload, ForgotPasswordPayload, ResetPasswordPayload, ChangePasswordPayload, UserProfile } from '@/types';
 
 export const authService = {
     login: async (payload: LoginPayload): Promise<APIResponse<UserData>> => {
@@ -17,4 +17,13 @@ export const authService = {
     changePassword: async (payload: ChangePasswordPayload): Promise<APIResponse<UserData>> => {
         return await client.post("/change-password", payload);
     },
+    GetUserProfile: async (): Promise<APIResponse<UserProfile>> => {
+        return await client.get("/profile");
+    },
+    UpdateUserProfile: async (payload: UserProfile): Promise<APIResponse<UserProfile>> => {
+        return await client.put("/profile", payload);
+    },
+    Logout: async (): Promise<APIResponse<UserData>> => {
+        return await client.post("/logout", {});
+    }
 }
