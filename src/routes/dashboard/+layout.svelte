@@ -1,6 +1,6 @@
 <script lang="ts">
     import { onMount } from "svelte";
-    import Logo from "$lib/components/ui/Logo.svelte";
+
     import { goto } from "$app/navigation";
     import { authService } from "$lib/services/authService";
     import AppSidebar from "$lib/components/ui/AppSidebar.svelte";
@@ -49,7 +49,6 @@
                     <Separator orientation="vertical" class="mr-2 h-4" />
 
                     <div class="flex items-center gap-2">
-                        <Logo className="h-6 w-auto" />
                         <span class="text-sm font-semibold tracking-tight">
                             {user?.name}'s Todo
                         </span>
