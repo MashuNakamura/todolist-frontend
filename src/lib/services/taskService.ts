@@ -21,10 +21,10 @@ export const taskService = {
     },
 
     // [GET] /api/tasks/user/:id
-    getTaskByUserId: async (id: number): Promise<APIResponse<Task[]>> => {
-        const response = await client.get(`/tasks/user/${id}`);
-        return response;
-    },
+    // getTaskByUserId: async (id: number): Promise<APIResponse<Task[]>> => {
+    //     const response = await client.get(`/tasks/user/${id}`);
+    //     return response;
+    // },
 
     // [PUT] /api/tasks/:id
     updateTask: async (id: number, payload: UpdateTaskPayload): Promise<APIResponse<Task>> => {
@@ -33,9 +33,8 @@ export const taskService = {
     },
 
     // [DELETE] /api/tasks/:id
-    deleteTask: async (ids: number[]): Promise<APIResponse<Task>> => {
-        const response = await client.delete(`/tasks/${ids}`);
-        return response;
+    deleteTask: async (ids: number[]): Promise<APIResponse<any>> => {
+        return await client.delete(`/tasks`, { ids });
     },
 
     // [PUT] /api/tasks/status

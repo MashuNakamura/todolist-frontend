@@ -1,5 +1,5 @@
 import { client } from "$lib";
-import type { APIResponse, CreateCategoryPayload, Category, UpdateCategoryPayload } from '@/types';
+import type { APIResponse, CreateCategoryPayload, Category, UpdateCategoryPayload } from "$lib";
 
 export const categoryService = {
     createCategory: async (payload: CreateCategoryPayload): Promise<APIResponse<Category>> => {
@@ -7,8 +7,8 @@ export const categoryService = {
         return response;
     },
 
-    getCategories: async (id: number): Promise<APIResponse<Category[]>> => {
-        const response = await client.get(`/categories/user/${id}`);
+    getCategories: async (): Promise<APIResponse<Category[]>> => {
+        const response = await client.get(`/categories`);
         return response;
     },
 

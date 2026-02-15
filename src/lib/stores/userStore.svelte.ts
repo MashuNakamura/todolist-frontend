@@ -1,5 +1,6 @@
 class UserState {
     profile = $state({
+        ID: 0,
         name: "",
         email: "",
     });

@@ -5,6 +5,9 @@
     import * as Dialog from "$lib/components/ui/dialog";
     import { Input } from "$lib/components/ui/input";
     import { Label } from "$lib/components/ui/label";
+    import { categoryService, taskService } from "$lib";
+    import { userStore } from "$lib/stores/userStore.svelte";
+    import type { Category } from "$lib";
     import {
         Plus,
         MoreVertical,
@@ -16,18 +19,14 @@
     } from "lucide-svelte";
     import { toast } from "svelte-sonner";
 
-    // --- 1. STATE & DATA ---
-    // Data Dummy (Nanti dari DB)
-    let categories = $state([
-        { id: 1, name: "Development", count: 12, color: "bg-blue-500" },
-        { id: 2, name: "Backend", count: 5, color: "bg-orange-500" },
-        { id: 3, name: "Design", count: 3, color: "bg-pink-500" },
-        { id: 4, name: "Personal", count: 8, color: "bg-green-500" },
-        { id: 5, name: "Internship", count: 2, color: "bg-purple-500" },
-        { id: 6, name: "Urgent", count: 1, color: "bg-red-500" },
-    ]);
+    // --- 1. STATE ---
+    // State Form
+    const formData = $state({
+        name: "",
+        color: "",
+    });
 
-    // Pilihan warna untuk kategori (Tailwind classes)
+    // Color Options
     const colorOptions = [
         "bg-red-500",
         "bg-orange-500",
@@ -48,66 +47,156 @@
         "bg-rose-500",
     ];
 
-    // State untuk Search & Dialog
     let searchQuery = $state("");
     let isDialogOpen = $state(false);
     let isEditMode = $state(false);
     let editingId = $state<number | null>(null);
+    let isLoading = $state(false);
 
-    // State Form (Default)
-    let formData = $state({
-        name: "",
-        color: "bg-zinc-500",
+    let categories = $state<Category[]>([]);
+
+    // --- 2. FETCH DATA ---
+    $effect(() => {
+        const userId = userStore.profile.ID;
+        if (!userId) return;
+
+        Promise.all([
+            categoryService.getCategories(),
+            taskService.getTasks(),
+        ]).then(([catRes, taskRes]) => {
+            if (catRes.success && taskRes.success) {
+                const allCats = catRes.data || [];
+                const allTasks = taskRes.data || [];
+
+                categories = allCats.map((cat: any) => {
+                    const taskCount = allTasks.filter(
+                        (t: any) => t.tags && t.tags.includes(cat.name),
+                    ).length;
+
+                    return {
+                        ID: cat.ID,
+                        name: cat.name,
+                        color: cat.color,
+                        count: taskCount,
+                    };
+                });
+            } else {
+                console.error("Failed to load data");
+            }
+        });
     });
 
-    // --- 2. LOGIC ---
+    // --- 3. LOGIC ---
     const filteredCategories = $derived(
         categories.filter((c) =>
             c.name.toLowerCase().includes(searchQuery.toLowerCase()),
         ),
     );
 
-    // --- 3. HANDLERS ---
+    // --- 4. HANDLERS ---
     function openAddDialog() {
         isEditMode = false;
-        formData = { name: "", color: "bg-blue-500" }; // Reset form
+        formData.name = "";
+        formData.color = "bg-blue-500";
         isDialogOpen = true;
     }
 
     function openEditDialog(cat: any) {
         isEditMode = true;
-        editingId = cat.id;
-        formData = { name: cat.name, color: cat.color };
+        editingId = cat.ID;
+        formData.name = cat.name;
+        formData.color = cat.color;
         isDialogOpen = true;
     }
 
-    function handleDelete(id: number) {
-        categories = categories.filter((c) => c.id !== id);
-        toast.error("Category deleted");
+    async function handleDelete(id: number) {
+        // Optimistic UI
+        const originalCategories = [...categories];
+        categories = categories.filter((c) => c.ID !== id);
+
+        const res = await categoryService.deleteCategory(id);
+
+        if (res.success) {
+            toast.success("Category deleted");
+        } else {
+            categories = originalCategories;
+            toast.error(res.message || "Failed to delete category");
+        }
     }
 
-    function handleSave(e: Event) {
+    async function handleSave(e: Event) {
         e.preventDefault();
+        isLoading = true;
 
         if (isEditMode && editingId) {
-            // Update Logic
-            const index = categories.findIndex((c) => c.id === editingId);
-            if (index !== -1) {
-                categories[index] = { ...categories[index], ...formData };
-                toast.success("Category updated successfully");
+            const originalCat = categories.find((c) => c.ID === editingId);
+
+            if (
+                originalCat &&
+                originalCat.name === formData.name &&
+                originalCat.color === formData.color
+            ) {
+                toast.info("No changes detected");
+                isLoading = false;
+                isDialogOpen = false;
+                return;
             }
-        } else {
-            // Create Logic
-            categories.push({
-                id: Date.now(),
+
+            // --- UPDATE LOGIC ---
+            const payload = {
+                ID: editingId,
                 name: formData.name,
                 color: formData.color,
-                count: 0,
-            });
-            toast.success("New category created");
+            };
+
+            const res = await categoryService.updateCategory(
+                editingId,
+                payload,
+            );
+
+            if (res.success) {
+                toast.success("Category updated successfully");
+                // Update Local State
+                const index = categories.findIndex((c) => c.ID === editingId);
+                if (index !== -1) {
+                    categories[index] = {
+                        ...categories[index],
+                        name: formData.name,
+                        color: formData.color,
+                    };
+                }
+                isDialogOpen = false;
+            } else {
+                toast.error(res.message || "Failed to update category");
+            }
+        } else {
+            // --- CREATE LOGIC ---
+            const payload = {
+                name: formData.name,
+                color: formData.color,
+            };
+
+            const res = await categoryService.createCategory(payload);
+
+            if (res.success && res.data) {
+                toast.success("New category created");
+                // Push ke Local State
+                categories = [
+                    ...categories,
+                    {
+                        ID: res.data.ID,
+                        name: res.data.name,
+                        color: res.data.color,
+                        count: 0,
+                    },
+                ];
+                isDialogOpen = false;
+            } else {
+                toast.error(res.message || "Failed to create category");
+            }
         }
 
-        isDialogOpen = false;
+        isLoading = false;
     }
 </script>
 
@@ -141,7 +230,7 @@
     <div
         class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4"
     >
-        {#each filteredCategories as cat (cat.id)}
+        {#each filteredCategories as cat (cat.ID)}
             <Card.Root
                 class="group hover:border-primary/50 transition-colors bg-card"
             >
@@ -174,7 +263,7 @@
                             <DropdownMenu.Separator />
                             <DropdownMenu.Item
                                 class="text-destructive"
-                                onclick={() => handleDelete(cat.id)}
+                                onclick={() => handleDelete(cat.ID)}
                                 ><Trash2 class="mr-2 h-4 w-4" /> Delete</DropdownMenu.Item
                             >
                         </DropdownMenu.Content>
@@ -266,8 +355,9 @@
                     variant="outline"
                     onclick={() => (isDialogOpen = false)}>Cancel</Button
                 >
-                <Button type="submit">{isEditMode ? "Update" : "Create"}</Button
-                >
+                <Button type="submit" disabled={isLoading}>
+                    {isLoading ? "Saving..." : isEditMode ? "Update" : "Create"}
+                </Button>
             </Dialog.Footer>
         </form>
     </Dialog.Content>

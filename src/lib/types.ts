@@ -49,6 +49,7 @@ export interface Category {
     ID: number;
     name: string;
     color: string;
+    count: number;
 }
 
 export interface CreateCategoryPayload {
