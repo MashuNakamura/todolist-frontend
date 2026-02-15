@@ -33,5 +33,9 @@ export const authService = {
     // Already used on Sidebar and Settings Page
     Logout: () => {
         localStorage.removeItem("token");
-    }
+    },
+    // Di dalam object authService
+    googleLogin: async (): Promise<{ url: string }> => {
+        return await client.get("/auth/google/login");
+    },
 }
