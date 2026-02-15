@@ -40,6 +40,7 @@
 
     // Task State
     let tasks = $state<Task[]>([]);
+    let originalTaskData = $state<any>(null);
 
     // Category State (Dummy)
     let categories = $state([
@@ -56,7 +57,7 @@
         desc: "",
         longDesc: "",
         priority: "Medium",
-        time: "09:00",
+        due_date: "",
         tags: [] as string[],
     });
     let tagInput = $state("");
@@ -88,10 +89,9 @@
                 short_desc: task.short_desc,
                 long_desc: task.long_desc,
                 priority: task.priority,
-                time: task.time,
                 tags: task.tags || [],
                 status: task.status,
-                date: task.date,
+                due_date: task.due_date,
                 user_id: task.user_id,
             }));
         } catch (error) {
@@ -123,18 +123,40 @@
     );
 
     // CRUD Handlers
-
     // SAVE (CREATE / UPDATE)
     async function handleSaveTask(e: Event) {
         e.preventDefault();
 
-        // Siapkan Payload buat Backend (pake any biar TS gak rewel)
+        if (!newTask.text.trim()) {
+            toast.error("Task title is required");
+            return;
+        }
+
+        if (isEditMode && originalTaskData) {
+            const isUnchanged =
+                newTask.text === originalTaskData.text &&
+                newTask.desc === originalTaskData.desc &&
+                newTask.longDesc === originalTaskData.longDesc &&
+                newTask.priority === originalTaskData.priority &&
+                newTask.due_date === originalTaskData.due_date &&
+                JSON.stringify(newTask.tags) ===
+                    JSON.stringify(originalTaskData.tags);
+
+            if (isUnchanged) {
+                toast.info("No changes made.");
+                isAddDialogOpen = false;
+                return;
+            }
+        }
+
         const payload: any = {
             title: newTask.text,
             short_desc: newTask.desc,
             long_desc: newTask.longDesc,
             priority: newTask.priority,
-            time: newTask.time,
+            due_date: newTask.due_date
+                ? new Date(newTask.due_date).toISOString()
+                : null,
             tags: newTask.tags,
             status: "todo",
         };
@@ -148,14 +170,13 @@
                         (t) => t.ID === editingTaskId,
                     );
                     if (index !== -1) {
-                        // Update local state
                         tasks[index] = {
                             ...tasks[index],
                             title: payload.title,
                             short_desc: payload.short_desc,
                             long_desc: payload.long_desc,
                             priority: payload.priority,
-                            time: payload.time,
+                            due_date: payload.due_date,
                             tags: payload.tags,
                         };
                     }
@@ -164,35 +185,31 @@
                     toast.error("Update failed: " + res.message);
                 }
             } else {
-                // --- CREATE ---
                 const res = await api.createTask(payload);
                 if (res.success) {
-                    const newItem = res.data; // Data asli dari DB
+                    const newItem = res.data;
                     tasks.push({
                         ID: newItem.ID,
-                        title: newItem.Title,
-                        short_desc: newItem.ShortDesc,
-                        long_desc: newItem.LongDesc,
-                        priority: newItem.Priority,
-                        time: newItem.Time,
-                        tags: newItem.Tags || [],
-                        status: newItem.Status,
-                        date: newItem.Date,
-                        user_id: newItem.UserID,
+                        title: newItem.title,
+                        short_desc: newItem.short_desc,
+                        long_desc: newItem.long_desc,
+                        priority: newItem.priority,
+                        tags: newItem.tags || [],
+                        status: newItem.status,
+                        due_date: newItem.due_date,
+                        user_id: newItem.user_id,
                     });
                     toast.success("Task created!");
                 } else {
                     toast.error("Create failed: " + res.message);
                 }
             }
-
-            // Reset Form
             newTask = {
                 text: "",
                 desc: "",
                 longDesc: "",
                 priority: "Medium",
-                time: "09:00",
+                due_date: "",
                 tags: [],
             };
             isAddDialogOpen = false;
@@ -270,18 +287,34 @@
     }
 
     function openEditDialog(task: any) {
-        isEditMode = true;
-        editingTaskId = task.id;
-        newTask = {
-            text: task.text,
-            desc: task.desc || "",
-            longDesc: task.longDesc || "",
-            priority: task.priority,
-            time: task.time,
-            tags: [...task.tags],
-        };
-        isAddDialogOpen = true;
         isDetailOpen = false;
+
+        setTimeout(() => {
+            isEditMode = true;
+            editingTaskId = task.ID;
+
+            let formattedDate = "";
+            if (task.due_date) {
+                if (task.due_date.length >= 16) {
+                    formattedDate = task.due_date.substring(0, 16);
+                } else if (task.due_date.length === 10) {
+                    formattedDate = `${task.due_date}T09:00`;
+                }
+            }
+
+            newTask = {
+                text: task.title,
+                desc: task.short_desc,
+                longDesc: task.long_desc || "",
+                priority: task.priority,
+                due_date: formattedDate,
+                tags: [...(task.tags || [])],
+            };
+
+            originalTaskData = JSON.parse(JSON.stringify(newTask));
+
+            isAddDialogOpen = true;
+        }, 350);
     }
 
     function toggleTag(tagName: string) {
@@ -357,7 +390,7 @@
                     desc: "",
                     longDesc: "",
                     priority: "Medium",
-                    time: "09:00",
+                    due_date: "",
                     tags: [],
                 };
                 isAddDialogOpen = true;
@@ -376,15 +409,31 @@
         <div class="lg:col-span-8 flex flex-col gap-6 h-full">
             <Card.Root class="border-none bg-muted/20 shadow-none shrink-0">
                 <Card.Content class="p-6 space-y-3">
-                    <div
-                        class="flex items-center justify-between text-sm font-bold"
-                    >
-                        <div class="flex items-center gap-2">
-                            <CheckCircle2 class="h-4 w-4 text-primary" /> Progress
+                    {#if tasks.length > 0}
+                        <div
+                            class="flex items-center justify-between text-sm font-bold"
+                        >
+                            <div class="flex items-center gap-2">
+                                <CheckCircle2 class="h-4 w-4 text-primary" /> Progress
+                            </div>
+                            <span>{Math.round(progressPercent)}% Done</span>
                         </div>
-                        <span>{Math.round(progressPercent)}% Done</span>
-                    </div>
-                    <Progress.Root value={progressPercent} class="h-2" />
+
+                        <Progress.Root value={progressPercent} class="h-2" />
+                    {/if}
+                    {#if tasks.length === 0}
+                        <div
+                            class="flex items-center justify-between text-sm font-bold"
+                        >
+                            <div class="flex items-center gap-2">
+                                <CheckCircle2 class="h-4 w-4 text-primary" /> No
+                                tasks for today
+                            </div>
+                            <span>0% Done</span>
+                        </div>
+
+                        <Progress.Root value={0} class="h-2" />
+                    {/if}
                 </Card.Content>
             </Card.Root>
 
@@ -484,8 +533,18 @@
                                             <div
                                                 class="flex items-center gap-1 text-[9px] text-muted-foreground font-bold font-mono"
                                             >
-                                                <Clock class="h-3 w-3" />
-                                                {task.time}
+                                                {#if task.due_date}
+                                                    <Clock class="h-3 w-3" />
+                                                    {new Date(
+                                                        task.due_date,
+                                                    ).toLocaleTimeString(
+                                                        "id-ID",
+                                                        {
+                                                            hour: "2-digit",
+                                                            minute: "2-digit",
+                                                        },
+                                                    )}
+                                                {/if}
                                             </div>
                                         </div>
                                         <ChevronRight
@@ -726,16 +785,18 @@
                     <div class="grid grid-cols-2 gap-4">
                         <div class="grid gap-2">
                             <Label
-                                for="time"
+                                for="due_date"
                                 class="text-[10px] uppercase font-black text-muted-foreground"
-                                >Time</Label
+                                >Due Date</Label
                             >
-                            <Input
-                                id="time"
-                                type="time"
-                                bind:value={newTask.time}
-                                class="bg-muted/10"
-                            />
+                            <div class="relative">
+                                <Input
+                                    id="due_date"
+                                    type="datetime-local"
+                                    bind:value={newTask.due_date}
+                                    class="bg-muted/10 custom-time-input"
+                                />
+                            </div>
                         </div>
                         <div class="grid gap-2">
                             <Label
@@ -822,23 +883,39 @@
                         )}">{selectedTask.priority} PRIORITY</Badge
                     >
                     <Sheet.Title class="text-3xl font-bold tracking-tight"
-                        >{selectedTask.text}</Sheet.Title
+                        >{selectedTask.title}</Sheet.Title
                     >
                     <div
                         class="flex items-center gap-4 text-xs font-bold text-muted-foreground uppercase border-y py-4"
                     >
                         <span class="flex items-center gap-1.5"
-                            ><CalendarIcon class="h-4 w-4 text-primary" /> Feb 12,
-                            2026</span
+                            ><CalendarIcon class="h-4 w-4 text-primary" />
+                            {selectedTask.due_date
+                                ? new Date(
+                                      selectedTask.due_date,
+                                  ).toLocaleDateString("id-ID", {
+                                      weekday: "long",
+                                      year: "numeric",
+                                      month: "long",
+                                      day: "numeric",
+                                  })
+                                : "No Date"}</span
                         >
                         <span class="flex items-center gap-1.5"
                             ><Clock class="h-4 w-4 text-primary" />
-                            {selectedTask.time}</span
+                            {selectedTask.due_date
+                                ? new Date(
+                                      selectedTask.due_date,
+                                  ).toLocaleTimeString("id-ID", {
+                                      hour: "2-digit",
+                                      minute: "2-digit",
+                                  })
+                                : "--:--"}</span
                         >
                     </div>
                 </header>
 
-                {#if selectedTask.longDesc && selectedTask.longDesc !== ""}
+                {#if selectedTask.long_desc}
                     <section class="space-y-4">
                         <div
                             class="flex items-center gap-2 font-black text-[10px] uppercase tracking-widest text-primary"
@@ -848,7 +925,7 @@
                         <div
                             class="text-sm leading-relaxed text-muted-foreground bg-muted/20 p-6 rounded-2xl border-2 border-dashed border-muted italic font-medium"
                         >
-                            "{selectedTask.longDesc}"
+                            "{selectedTask.long_desc}"
                         </div>
                     </section>
                 {/if}
@@ -874,6 +951,7 @@
                     </div>
                 </section>
             </div>
+
             <div class="p-6 border-t flex gap-3 bg-muted/5">
                 <Button
                     variant="outline"
@@ -896,35 +974,37 @@
 {#if selectedIds.length > 0}
     <div class="fixed bottom-8 left-1/2 -translate-x-1/2 z-50">
         <div
-            class="bg-primary text-primary-foreground px-4 md:px-6 py-3 rounded-full shadow-2xl flex items-center gap-4 border border-white/10"
+            class="bg-primary text-primary-foreground px-4 md:px-6 py-3 rounded-full shadow-2xl flex items-center gap-4 border border-border"
         >
-            <span class="text-xs md:text-sm font-bold tracking-tight uppercase"
-                >{selectedIds.length} Selected</span
-            >
+            <span class="text-xs md:text-sm font-bold tracking-tight uppercase">
+                {selectedIds.length} Selected
+            </span>
+
             <Separator
                 orientation="vertical"
                 class="h-4 bg-primary-foreground/30"
             />
+
             <Button
                 variant="secondary"
                 size="sm"
-                class="h-8 rounded-full font-bold px-4 text-[10px] md:text-xs text-primary bg-white"
+                class="h-8 rounded-full font-bold px-4 text-[10px] md:text-xs"
                 onclick={bulkMarkDone}
             >
                 <Check class="mr-2 h-3 w-3" /> Mark Done
             </Button>
+
             <Button
                 variant="destructive"
                 size="sm"
-                class="h-8 rounded-full font-black px-4 text-[10px] md:text-xs"
+                class="h-8 rounded-full font-black px-4 text-[10px] md:text-xs hover:bg-destructive/90"
                 onclick={() => {
-                    // Logic delete bulk manual kalau api bulk delete belum ada
-                    // Tapi di script atas saya sudah pake updateStatus 'done'
-                    // Kalau mau delete beneran:
                     selectedIds.forEach((id) => deleteTask(id));
                     selectedIds = [];
-                }}>Delete All</Button
+                }}
             >
+                Delete All
+            </Button>
         </div>
     </div>
 {/if}

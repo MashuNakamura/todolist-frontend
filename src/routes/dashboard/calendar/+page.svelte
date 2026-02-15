@@ -41,8 +41,7 @@
         {
             id: 1,
             text: "Setup Project SvelteKit",
-            time: "09:00",
-            date: "2026-02-12",
+            due_date: "2026-02-12T09:00:00.000Z",
             priority: "High",
             done: true,
             tag: "Dev",
@@ -50,8 +49,7 @@
         {
             id: 2,
             text: "Integrate Shadcn UI",
-            time: "11:00",
-            date: "2026-02-12",
+            due_date: "2026-02-12T11:00:00.000Z",
             priority: "Medium",
             done: true,
             tag: "UI",
@@ -59,8 +57,7 @@
         {
             id: 3,
             text: "Client Meeting",
-            time: "13:00",
-            date: "2026-02-13",
+            due_date: "2026-02-13T13:00:00.000Z",
             priority: "High",
             done: false,
             tag: "Meeting",
@@ -68,8 +65,7 @@
         {
             id: 4,
             text: "Database Backup",
-            time: "09:00",
-            date: "2026-02-14",
+            due_date: "2026-02-14T09:00:00.000Z",
             priority: "Low",
             done: false,
             tag: "DevOps",
@@ -77,8 +73,7 @@
         {
             id: 5,
             text: "Fix Auth Bug",
-            time: "15:00",
-            date: "2026-02-12",
+            due_date: "2026-02-12T15:00:00.000Z",
             priority: "High",
             done: false,
             tag: "Bugfix",
@@ -93,7 +88,7 @@
         text: "",
         desc: "",
         priority: "Medium",
-        time: "09:00",
+        due_date: "",
         tags: [] as string[],
     });
     let tagInput = $state("");
@@ -103,8 +98,14 @@
 
     const selectedTasks = $derived(
         tasks
-            .filter((t) => t.date === selectedDateStr)
-            .sort((a, b) => a.time.localeCompare(b.time)),
+            .filter((t) => {
+                if (!t.due_date) return false;
+                const taskDate = new Date(t.due_date)
+                    .toLocaleDateString("sv")
+                    .split("T")[0]; // YYYY-MM-DD local
+                return taskDate === selectedDateStr;
+            })
+            .sort((a, b) => (a.due_date || "").localeCompare(b.due_date || "")),
     );
 
     const formattedDateHeader = $derived(
@@ -124,7 +125,7 @@
             text: "",
             desc: "",
             priority: "Medium",
-            time: "09:00",
+            due_date: value ? `${value.toString()}T09:00` : "", // Pre-fill with selected date + 09:00
             tags: [],
         };
         isAddDialogOpen = true;
@@ -136,8 +137,9 @@
         tasks.push({
             id: Date.now(),
             text: newTask.text,
-            time: newTask.time,
-            date: selectedDateStr, // PENTING: Pakai tanggal dari kalender
+            due_date: newTask.due_date
+                ? new Date(newTask.due_date).toISOString()
+                : new Date().toISOString(),
             priority: newTask.priority,
             done: false,
             tag: newTask.tags[0] || "General", // Ambil tag pertama sbg utama
@@ -276,7 +278,17 @@
                                         <div
                                             class="w-14 shrink-0 text-[11px] font-mono font-bold text-muted-foreground pt-3 text-right"
                                         >
-                                            {task.time}
+                                            {task.due_date
+                                                ? new Date(
+                                                      task.due_date,
+                                                  ).toLocaleTimeString(
+                                                      "id-ID",
+                                                      {
+                                                          hour: "2-digit",
+                                                          minute: "2-digit",
+                                                      },
+                                                  )
+                                                : "--:--"}
                                         </div>
                                         <div
                                             class="absolute left-[66px] top-0 bottom-0 w-[2px] bg-muted group-last:bottom-auto group-last:h-6"
@@ -474,8 +486,8 @@
                         <Label>Time</Label>
                         <div class="relative">
                             <Input
-                                type="time"
-                                bind:value={newTask.time}
+                                type="datetime-local"
+                                bind:value={newTask.due_date}
                                 class="custom-time-input"
                             />
                             <Clock

@@ -1,6 +1,14 @@
 <script lang="ts">
     import { page } from "$app/stores";
-    import { Calendar, Home, Layers, Settings, ListTodo } from "lucide-svelte";
+    import {
+        Calendar,
+        Home,
+        Layers,
+        Settings,
+        ListTodo,
+        LogOut,
+        User as UserIcon,
+    } from "lucide-svelte";
     import {
         Sidebar,
         SidebarContent,
@@ -10,17 +18,26 @@
         SidebarMenu,
         SidebarMenuButton,
         SidebarMenuItem,
+        SidebarFooter,
     } from "$lib/components/ui/sidebar";
     import { authService } from "$lib/services/authService";
+    import { goto } from "$app/navigation";
+
+    let { user } = $props();
 
     let name = $state("");
 
+    function handleLogout() {
+        authService.Logout();
+        window.location.href = "/auth";
+    }
+
     const items = [
-        { title: "Dashboard", url: "/", icon: Home },
-        { title: "Calendar", url: "/calendar", icon: Calendar },
-        { title: "Categories", url: "/categories", icon: Layers },
-        { title: "All Tasks", url: "/tasks", icon: ListTodo },
-        { title: "Settings", url: "/settings", icon: Settings },
+        { title: "Dashboard", url: "/dashboard", icon: Home },
+        { title: "Calendar", url: "/dashboard/calendar", icon: Calendar },
+        { title: "Categories", url: "/dashboard/categories", icon: Layers },
+        { title: "All Tasks", url: "/dashboard/tasks", icon: ListTodo },
+        { title: "Settings", url: "/dashboard/settings", icon: Settings },
     ];
 
     $effect(() => {
@@ -28,7 +45,7 @@
             if (res.success && res.data) {
                 name = res.data.name;
             } else {
-                window.location.href = "/auth";
+                goto("/auth");
             }
         });
     });
@@ -77,4 +94,34 @@
             </SidebarGroupContent>
         </SidebarGroup>
     </SidebarContent>
+
+    <SidebarFooter class="border-t p-2">
+        <SidebarMenu>
+            <SidebarMenuItem>
+                <SidebarMenuButton
+                    class="w-full justify-start gap-2 px-2 hover:bg-transparent cursor-default"
+                >
+                    <UserIcon class="h-4 w-4" />
+                    <div class="flex flex-col items-start text-xs">
+                        <span class="font-bold truncate max-w-[150px]"
+                            >{name || "User"}</span
+                        >
+                        <span class="text-muted-foreground text-[10px]"
+                            >Logged in</span
+                        >
+                    </div>
+                </SidebarMenuButton>
+            </SidebarMenuItem>
+
+            <SidebarMenuItem>
+                <SidebarMenuButton
+                    onclick={handleLogout}
+                    class="w-full justify-start gap-2 text-red-500 hover:text-red-600 hover:bg-red-100/10 px-2 transition-colors"
+                >
+                    <LogOut class="h-4 w-4" />
+                    <span class="font-medium">Log out</span>
+                </SidebarMenuButton>
+            </SidebarMenuItem>
+        </SidebarMenu>
+    </SidebarFooter>
 </Sidebar>
