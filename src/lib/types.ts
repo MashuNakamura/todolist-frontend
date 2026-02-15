@@ -8,7 +8,7 @@ export interface APIResponse<T> {
 export interface UserData {
     token: string;
     user: {
-        id: number;
+        ID: number;
         name: string;
         email: string;
     };
@@ -38,6 +38,17 @@ export interface ResetPasswordPayload {
 export interface ChangePasswordPayload {
     old_password: string;
     new_password: string;
+}
+
+export interface CreateCategoryPayload {
+    name: string;
+    color: string;
+}
+
+export interface UpdateCategoryPayload {
+    ID: number;
+    name: string;
+    color: string;
 }
 
 export interface UserProfile {

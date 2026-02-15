@@ -75,7 +75,7 @@ export const api = {
             short_desc: task.short_desc,
             long_desc: task.long_desc,
             priority: task.priority,
-            time: task.time,
+            due_date: task.due_date,
             tags: task.tags,
             status: task.status
         }
@@ -140,41 +140,5 @@ export const api = {
             body: JSON.stringify({ ids, status })
         });
         return await res.json();
-    },
-
-    // Category API
-    createCategory: async (name: string, color: string) => {
-        const response = await fetch(`${PUBLIC_API_URL}/categories`, {
-            method: "POST",
-            headers: getAuthHeaders(),
-            body: JSON.stringify({ name, color }),
-        });
-        return await response.json();
-    },
-
-    getCategories: async () => {
-        const userId = getUserIdFromToken();
-        const response = await fetch(`${PUBLIC_API_URL}/categories/user/${userId}`, {
-            headers: getAuthHeaders(),
-        });
-        const json: APIResponse<Category[]> = await response.json();
-        return json.data || [];
-    },
-
-    updateCategory: async (id: number, name: string, color: string) => {
-        const response = await fetch(`${PUBLIC_API_URL}/categories/${id}`, {
-            method: "PUT",
-            headers: getAuthHeaders(),
-            body: JSON.stringify({ name, color }),
-        });
-        return await response.json();
-    },
-
-    deleteCategory: async (id: number) => {
-        const response = await fetch(`${PUBLIC_API_URL}/categories/${id}`, {
-            method: "DELETE",
-            headers: getAuthHeaders(),
-        });
-        return await response.json();
     },
 }
