@@ -5,6 +5,11 @@ export interface APIResponse<T> {
     error?: number;
 }
 
+export interface UserProfile {
+    name: string;
+    email?: string;
+}
+
 export interface UserData {
     token: string;
     user: {
@@ -40,6 +45,12 @@ export interface ChangePasswordPayload {
     new_password: string;
 }
 
+export interface Category {
+    ID: number;
+    name: string;
+    color: string;
+}
+
 export interface CreateCategoryPayload {
     name: string;
     color: string;
@@ -51,11 +62,6 @@ export interface UpdateCategoryPayload {
     color: string;
 }
 
-export interface UserProfile {
-    name: string;
-    email?: string;
-}
-
 export interface Task {
     ID: number;
     title: string;
@@ -63,13 +69,30 @@ export interface Task {
     long_desc: string;
     priority: string;
     status: string;
-    due_date?: string; // ISO 8601 String
+    due_date?: string;
     tags: string[];
     user_id: number;
 }
 
-export interface Category {
+export interface CreateTaskPayload {
+    title: string;
+    short_desc: string;
+    long_desc: string;
+    priority: string;
+    status: string;
+    due_date?: string;
+    tags: string[];
+    user_id: number;
+}
+
+export interface UpdateTaskPayload {
     ID: number;
-    name: string;
-    color: string;
+    title: string;
+    short_desc: string;
+    long_desc: string;
+    priority: string;
+    status: string;
+    due_date?: string;
+    tags: string[];
+    user_id: number;
 }
