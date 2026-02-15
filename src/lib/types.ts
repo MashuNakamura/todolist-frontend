@@ -42,6 +42,7 @@ export interface ChangePasswordPayload {
 
 export interface UserProfile {
     name: string;
+    email?: string;
 }
 
 export interface Task {

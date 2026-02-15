@@ -21,11 +21,10 @@
         SidebarFooter,
     } from "$lib/components/ui/sidebar";
     import { authService } from "$lib/services/authService";
+    import { userStore } from "$lib/stores/userStore.svelte";
     import { goto } from "$app/navigation";
 
     let { user } = $props();
-
-    let name = $state("");
 
     function handleLogout() {
         authService.Logout();
@@ -43,7 +42,7 @@
     $effect(() => {
         authService.GetUserProfile().then((res) => {
             if (res.success && res.data) {
-                name = res.data.name;
+                userStore.setProfile(res.data);
             } else {
                 goto("/auth");
             }
@@ -104,7 +103,7 @@
                     <UserIcon class="h-4 w-4" />
                     <div class="flex flex-col items-start text-xs">
                         <span class="font-bold truncate max-w-[150px]"
-                            >{name || "User"}</span
+                            >{userStore.profile.name || "User"}</span
                         >
                         <span class="text-muted-foreground text-[10px]"
                             >Logged in</span

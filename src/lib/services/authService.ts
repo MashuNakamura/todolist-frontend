@@ -18,19 +18,19 @@ export const authService = {
     resetPassword: async (payload: ResetPasswordPayload): Promise<APIResponse<UserData>> => {
         return await client.post("/reset-password", payload);
     },
-    // Not used yet
+    // Already used on Settings Page
     changePassword: async (payload: ChangePasswordPayload): Promise<APIResponse<UserData>> => {
         return await client.post("/change-password", payload);
     },
-    // Already used on Dashboard Page, Landing Page, and Sidebar
+    // Already used on Dashboard Page, Landing Page, Settings Page, and Sidebar
     GetUserProfile: async (): Promise<APIResponse<UserProfile>> => {
         return await client.get("/profile");
     },
-    // Not used yet
+    // Already used on Settings Page
     UpdateUserProfile: async (payload: UserProfile): Promise<APIResponse<UserProfile>> => {
-        return await client.put("/profile", payload);
+        return await client.post("/update-profile", payload);
     },
-    // Already used on Sidebar
+    // Already used on Sidebar and Settings Page
     Logout: () => {
         localStorage.removeItem("token");
     }
