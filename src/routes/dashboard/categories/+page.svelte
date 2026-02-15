@@ -111,7 +111,7 @@
     }
 </script>
 
-<div class="w-full pb-32 px-2 md:px-6 bg-background min-h-screen">
+<div class="w-full pb-2 px-2 md:px-6 bg-background min-h-screen">
     <div class="flex items-center justify-between gap-4 mb-8">
         <div>
             <h1 class="text-2xl md:text-3xl font-bold tracking-tight">
