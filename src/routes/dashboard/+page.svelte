@@ -15,6 +15,7 @@
     import * as Progress from "$lib/components/ui/progress";
     import { Calendar } from "$lib/components/ui/calendar";
     import { Skeleton } from "$lib/components/ui/skeleton";
+    import { userStore } from "$lib/stores/userStore.svelte";
     import {
         Plus,
         Edit,
@@ -35,21 +36,71 @@
         Hash,
     } from "lucide-svelte";
     import { toast } from "svelte-sonner";
-    import { onMount } from "svelte";
-    import { api, type Task } from "$lib";
+    import { taskService, type Task } from "$lib";
+    import type { Category } from "$lib/types";
+    import { categoryService } from "$lib/services/categoryService";
 
     // Task State
     let tasks = $state<Task[]>([]);
     let originalTaskData = $state<any>(null);
 
-    // Category State (Dummy)
-    let categories = $state([
-        { name: "Dev", color: "bg-blue-500" },
-        { name: "UI", color: "bg-pink-500" },
-        { name: "Backend", color: "bg-orange-500" },
-        { name: "Urgent", color: "bg-red-500" },
-        { name: "Database", color: "bg-emerald-500" },
-    ]);
+    // Category State
+    let categories = $state<Category[]>([]);
+
+    $effect(() => {
+        const userId = userStore.profile.ID;
+        if (!userId) return;
+
+        async function initDashboard() {
+            try {
+                isLoading = true;
+
+                const [catRes, taskRes] = await Promise.all([
+                    categoryService.getCategories(),
+                    taskService.getTasks(),
+                ]);
+
+                if (catRes.success && taskRes.success) {
+                    const allTasks = taskRes.data || [];
+                    const allCats = catRes.data || [];
+
+                    tasks = allTasks.map((task: Task) => ({
+                        ID: task.ID,
+                        title: task.title,
+                        short_desc: task.short_desc,
+                        long_desc: task.long_desc,
+                        priority: task.priority,
+                        tags: task.tags || [],
+                        status: task.status,
+                        due_date: task.due_date,
+                        user_id: task.user_id,
+                    }));
+
+                    categories = allCats.map((cat: Category) => {
+                        const taskCount = allTasks.filter(
+                            (t: Task) => t.tags && t.tags.includes(cat.name),
+                        ).length;
+
+                        return {
+                            ID: cat.ID,
+                            name: cat.name,
+                            color: cat.color,
+                            count: taskCount,
+                        };
+                    });
+                } else {
+                    toast.error("Failed to sync data from server");
+                }
+            } catch (error) {
+                console.error("Dashboard Init Error:", error);
+                toast.error("An error occurred while loading your dashboard");
+            } finally {
+                isLoading = false;
+            }
+        }
+
+        initDashboard();
+    });
 
     // State Form Add Task
     let newTask = $state({
@@ -71,55 +122,80 @@
     let editingTaskId = $state<number | null>(null);
     let isLoading = $state(true);
 
-    // Fetch Tasks on Mount
-    onMount(async () => {
-        try {
-            isLoading = true;
-            const token = localStorage.getItem("token");
-            if (!token) {
-                window.location.href = "/login";
-                return;
-            }
+    // --- FILTERING & SORTING LOGIC ---
 
-            const fetchTasks = await api.getTasks();
+    // 1. Filter: Remove past tasks (keep today onwards + no date)
+    const visibleTasks = $derived.by(() => {
+        const now = new Date();
+        now.setHours(0, 0, 0, 0); // Start of today (Local/Jakarta if browser is there)
 
-            tasks = fetchTasks.map((task: any) => ({
-                ID: task.ID,
-                title: task.title,
-                short_desc: task.short_desc,
-                long_desc: task.long_desc,
-                priority: task.priority,
-                tags: task.tags || [],
-                status: task.status,
-                due_date: task.due_date,
-                user_id: task.user_id,
-            }));
-        } catch (error) {
-            console.error("Error fetching tasks:", error);
-            toast.error("Failed to load tasks");
-        } finally {
-            isLoading = false;
-        }
+        return tasks.filter((t: Task) => {
+            if (!t.due_date) return true; // Keep no-date tasks
+            // Parse due_date (ISO string)
+            const taskDate = new Date(t.due_date);
+            taskDate.setHours(0, 0, 0, 0); // Compare dates only
+            return taskDate >= now;
+        });
     });
 
-    // Pagination & Filter Logic
+    // 2. Sort: Ongoing > Due Date > Done (Bottom)
+    const sortedTasks = $derived.by(() => {
+        return [...visibleTasks].sort((a, b) => {
+            // Priority 1: Ongoing at top
+            if (a.status === "ongoing" && b.status !== "ongoing") return -1;
+            if (b.status === "ongoing" && a.status !== "ongoing") return 1;
+
+            // Priority 3: Done at bottom
+            if (a.status === "done" && b.status !== "done") return 1;
+            if (b.status === "done" && a.status !== "done") return -1;
+
+            // Priority 2: Nearest Due Date
+            // Handling null/undefined dates (put them last if both not done/ongoing?)
+            // Let's say: Earliest date first. No date lasts.
+            const dateA = a.due_date
+                ? new Date(a.due_date).getTime()
+                : Number.MAX_SAFE_INTEGER;
+            const dateB = b.due_date
+                ? new Date(b.due_date).getTime()
+                : Number.MAX_SAFE_INTEGER;
+
+            return dateA - dateB;
+        });
+    });
+
+    // 3. Category Sync: Count ONLY visible tasks
+    const syncedCategories = $derived.by(() => {
+        return categories.map((cat) => {
+            const count = visibleTasks.filter(
+                (t) => t.tags && t.tags.includes(cat.name),
+            ).length;
+            return { ...cat, count };
+        });
+    });
+
+    // Pagination
     let currentPage = $state(1);
     let perPage = 5;
-    const count = $derived(tasks.length);
+    const count = $derived(sortedTasks.length);
     const paginatedTasks = $derived(
-        tasks.slice((currentPage - 1) * perPage, currentPage * perPage),
+        sortedTasks.slice((currentPage - 1) * perPage, currentPage * perPage),
     );
 
+    // Filter Categories for Sidebar Search
     const filteredCategories = $derived(
-        categories.filter((cat) =>
+        syncedCategories.filter((cat) =>
             cat.name.toLowerCase().includes(categorySearch.toLowerCase()),
         ),
     );
+
+    // Progress
     const completedCount = $derived(
-        tasks.filter((t) => t.status === "done").length,
+        visibleTasks.filter((t) => t.status === "done").length,
     );
     const progressPercent = $derived(
-        tasks.length > 0 ? (completedCount / tasks.length) * 100 : 0,
+        visibleTasks.length > 0
+            ? (completedCount / visibleTasks.length) * 100
+            : 0,
     );
 
     // CRUD Handlers
@@ -154,51 +230,60 @@
             short_desc: newTask.desc,
             long_desc: newTask.longDesc,
             priority: newTask.priority,
-            due_date: newTask.due_date
-                ? new Date(newTask.due_date).toISOString()
-                : null,
+            due_date:
+                newTask.due_date && newTask.due_date !== ""
+                    ? new Date(newTask.due_date).toISOString()
+                    : null,
             tags: newTask.tags,
-            status: "todo",
+            status: isEditMode ? selectedTask.status : "todo",
         };
 
         try {
             if (isEditMode && editingTaskId) {
                 // UPDATE
-                const res = await api.updateTask(editingTaskId, payload);
+                const res = await taskService.updateTask(
+                    editingTaskId,
+                    payload,
+                );
                 if (res.success) {
-                    const index = tasks.findIndex(
-                        (t) => t.ID === editingTaskId,
+                    // Update Reassignment
+                    tasks = tasks.map((t) =>
+                        t.ID === editingTaskId
+                            ? {
+                                  ...t,
+                                  title: payload.title,
+                                  short_desc: payload.short_desc,
+                                  long_desc: payload.long_desc,
+                                  priority: payload.priority,
+                                  due_date: payload.due_date,
+                                  tags: payload.tags,
+                                  status: payload.status,
+                              }
+                            : t,
                     );
-                    if (index !== -1) {
-                        tasks[index] = {
-                            ...tasks[index],
-                            title: payload.title,
-                            short_desc: payload.short_desc,
-                            long_desc: payload.long_desc,
-                            priority: payload.priority,
-                            due_date: payload.due_date,
-                            tags: payload.tags,
-                        };
-                    }
                     toast.success("Task updated!");
                 } else {
                     toast.error("Update failed: " + res.message);
                 }
             } else {
-                const res = await api.createTask(payload);
-                if (res.success) {
+                const res = await taskService.createTask(payload);
+                if (res.success && res.data) {
                     const newItem = res.data;
-                    tasks.push({
-                        ID: newItem.ID,
-                        title: newItem.title,
-                        short_desc: newItem.short_desc,
-                        long_desc: newItem.long_desc,
-                        priority: newItem.priority,
-                        tags: newItem.tags || [],
-                        status: newItem.status,
-                        due_date: newItem.due_date,
-                        user_id: newItem.user_id,
-                    });
+                    // Create Reassignment
+                    tasks = [
+                        ...tasks,
+                        {
+                            ID: newItem.ID,
+                            title: newItem.title,
+                            short_desc: newItem.short_desc,
+                            long_desc: newItem.long_desc,
+                            priority: newItem.priority,
+                            tags: newItem.tags || [],
+                            status: newItem.status,
+                            due_date: newItem.due_date,
+                            user_id: newItem.user_id,
+                        },
+                    ];
                     toast.success("Task created!");
                 } else {
                     toast.error("Create failed: " + res.message);
@@ -226,7 +311,7 @@
         if (!confirm("Delete this task?")) return;
 
         try {
-            const res = await api.deleteTask([id]);
+            const res = await taskService.deleteTask([id]);
             if (res.success) {
                 tasks = tasks.filter((t) => t.ID !== id);
                 toast.success("Task deleted");
@@ -238,45 +323,73 @@
         }
     }
 
-    // DELETE BULK (Mark Done / Delete Selected)
-    async function bulkMarkDone() {
+    // DELETE BULK
+    async function handleBulkDelete() {
+        if (selectedIds.length === 0) return;
+
+        const confirmDelete = confirm(`Delete ${selectedIds.length} tasks?`);
+        if (!confirmDelete) return;
+
         try {
-            const res = await api.updateStatus(selectedIds, "done");
+            const res = await taskService.deleteTask(selectedIds);
+
+            if (res.success) {
+                tasks = tasks.filter((t) => !selectedIds.includes(t.ID));
+                selectedIds = [];
+                toast.success("Tasks deleted successfully");
+            } else {
+                toast.error(res.message || "Failed to delete tasks");
+            }
+        } catch (error) {
+            console.error("Bulk Delete Error:", error);
+            toast.error("A system error occurred during deletion");
+        }
+    }
+
+    // TOGGLE STATUS (3-State)
+    async function updateStatus(task: Task, newStatus: string) {
+        try {
+            const res = await taskService.updateTask(task.ID, {
+                status: newStatus,
+            } as any);
+
+            if (res.success) {
+                // Svelte 5 Reassignment
+                tasks = tasks.map((t) =>
+                    t.ID === task.ID ? { ...t, status: newStatus } : t,
+                );
+
+                let msg = "";
+                if (newStatus === "done") msg = "Task completed! 🎉";
+                else if (newStatus === "ongoing") msg = "Task started 🚀";
+                else msg = "Task moved to Todo";
+
+                toast.success(msg);
+            }
+        } catch (error) {
+            toast.error("Failed to update status");
+        }
+    }
+
+    // BULK STATUS UPDATE
+    async function bulkUpdateStatus(status: string) {
+        try {
+            const res = await taskService.updateBatchStatus(
+                selectedIds,
+                status,
+            );
             if (res.success) {
                 tasks = tasks.map((t) => {
                     if (selectedIds.includes(t.ID)) {
-                        return { ...t, status: "done" };
+                        return { ...t, status: status };
                     }
                     return t;
                 });
                 selectedIds = [];
-                toast.success("Selected tasks marked as done");
+                toast.success(`Selected tasks marked as ${status}`);
             }
         } catch (error) {
             toast.error("Failed bulk update");
-        }
-    }
-
-    // TOGGLE DONE (Update Status Single)
-    async function toggleDone(task: any) {
-        const newStatus = task.done ? "todo" : "done";
-        try {
-            const res = await api.updateTask(task.ID, {
-                status: newStatus,
-            } as any);
-            if (res.success) {
-                const index = tasks.findIndex((t) => t.ID === task.ID);
-                if (index !== -1) {
-                    tasks[index].status = newStatus;
-                    toast.success(
-                        tasks[index].status === "done"
-                            ? "Marked as done"
-                            : "Marked as undone",
-                    );
-                }
-            }
-        } catch (error) {
-            toast.error("Failed to update status");
         }
     }
 
@@ -321,7 +434,7 @@
         if (newTask.tags.includes(tagName)) {
             newTask.tags = newTask.tags.filter((t) => t !== tagName);
         } else {
-            newTask.tags.push(tagName);
+            newTask.tags = [...newTask.tags, tagName];
         }
     }
 
@@ -329,7 +442,7 @@
         if (e.key === "Enter" && tagInput.trim()) {
             e.preventDefault();
             if (!newTask.tags.includes(tagInput.trim())) {
-                newTask.tags.push(tagInput.trim());
+                newTask.tags = [...newTask.tags, tagInput.trim()];
             }
             tagInput = "";
         }
@@ -369,7 +482,7 @@
     </Pagination.Root>
 {/snippet}
 
-<div class="w-full pb-8 px-2 md:px-6 bg-background min-h-screen">
+<div class="w-full pb-8 px-2 md:px-6 bg-background min-h-screen pt-4">
     <div class="flex items-center justify-between gap-4 mb-8">
         <div>
             <h1 class="text-2xl md:text-3xl font-bold tracking-tight">
@@ -377,7 +490,7 @@
             </h1>
             <p class="text-muted-foreground text-[10px] md:text-sm font-medium">
                 Welcome back! You have <span class="font-bold text-foreground"
-                    >{tasks.length - completedCount} tasks</span
+                    >{visibleTasks.length - completedCount} tasks</span
                 > left today.
             </p>
         </div>
@@ -409,7 +522,7 @@
         <div class="lg:col-span-8 flex flex-col gap-6 h-full">
             <Card.Root class="border-none bg-muted/20 shadow-none shrink-0">
                 <Card.Content class="p-6 space-y-3">
-                    {#if tasks.length > 0}
+                    {#if visibleTasks.length > 0}
                         <div
                             class="flex items-center justify-between text-sm font-bold"
                         >
@@ -421,18 +534,20 @@
 
                         <Progress.Root value={progressPercent} class="h-2" />
                     {/if}
-                    {#if tasks.length === 0}
+                    {#if visibleTasks.length === 0}
                         <div
-                            class="flex items-center justify-between text-sm font-bold"
+                            class="flex flex-col items-center justify-center py-8 text-center space-y-3 opacity-60"
                         >
-                            <div class="flex items-center gap-2">
-                                <CheckCircle2 class="h-4 w-4 text-primary" /> No
-                                tasks for today
+                            <div class="bg-primary/10 p-4 rounded-full">
+                                <CheckCircle2 class="h-8 w-8 text-primary" />
                             </div>
-                            <span>0% Done</span>
+                            <div class="space-y-1">
+                                <h3 class="font-bold text-lg">All done!</h3>
+                                <p class="text-sm text-muted-foreground">
+                                    No pending tasks for today.
+                                </p>
+                            </div>
                         </div>
-
-                        <Progress.Root value={0} class="h-2" />
                     {/if}
                 </Card.Content>
             </Card.Root>
@@ -456,7 +571,9 @@
                         <Card.Root
                             class="group transition-all {task.status === 'done'
                                 ? 'bg-muted/40 opacity-70'
-                                : 'bg-card'}"
+                                : task.status === 'ongoing'
+                                  ? 'bg-blue-500/5 border-blue-500/50 shadow-[0_0_15px_rgba(59,130,246,0.1)]'
+                                  : 'bg-card'}"
                         >
                             <Card.Content class="p-0 flex items-stretch">
                                 <div
@@ -538,7 +655,7 @@
                                                     {new Date(
                                                         task.due_date,
                                                     ).toLocaleTimeString(
-                                                        "id-ID",
+                                                        "en-US",
                                                         {
                                                             hour: "2-digit",
                                                             minute: "2-digit",
@@ -581,14 +698,80 @@
                                                 ><Edit class="mr-2 h-4 w-4" /> Edit
                                                 Task</DropdownMenu.Item
                                             >
-                                            <DropdownMenu.Item
-                                                onclick={() => toggleDone(task)}
-                                            >
-                                                <Check class="mr-2 h-4 w-4" />
-                                                {task.status
-                                                    ? "Mark as Undone"
-                                                    : "Mark as Done"}
-                                            </DropdownMenu.Item>
+
+                                            {#if task.status === "todo"}
+                                                <DropdownMenu.Item
+                                                    onclick={() =>
+                                                        updateStatus(
+                                                            task,
+                                                            "ongoing",
+                                                        )}
+                                                >
+                                                    <Clock
+                                                        class="mr-2 h-4 w-4"
+                                                    />
+                                                    Start Task
+                                                </DropdownMenu.Item>
+                                                <DropdownMenu.Item
+                                                    onclick={() =>
+                                                        updateStatus(
+                                                            task,
+                                                            "done",
+                                                        )}
+                                                >
+                                                    <Check
+                                                        class="mr-2 h-4 w-4"
+                                                    />
+                                                    Mark Done
+                                                </DropdownMenu.Item>
+                                            {:else if task.status === "ongoing"}
+                                                <DropdownMenu.Item
+                                                    onclick={() =>
+                                                        updateStatus(
+                                                            task,
+                                                            "todo",
+                                                        )}
+                                                >
+                                                    <X class="mr-2 h-4 w-4" />
+                                                    Mark Todo
+                                                </DropdownMenu.Item>
+                                                <DropdownMenu.Item
+                                                    onclick={() =>
+                                                        updateStatus(
+                                                            task,
+                                                            "done",
+                                                        )}
+                                                >
+                                                    <Check
+                                                        class="mr-2 h-4 w-4"
+                                                    />
+                                                    Mark Done
+                                                </DropdownMenu.Item>
+                                            {:else}
+                                                <DropdownMenu.Item
+                                                    onclick={() =>
+                                                        updateStatus(
+                                                            task,
+                                                            "todo",
+                                                        )}
+                                                >
+                                                    <X class="mr-2 h-4 w-4" />
+                                                    Mark Todo
+                                                </DropdownMenu.Item>
+                                                <DropdownMenu.Item
+                                                    onclick={() =>
+                                                        updateStatus(
+                                                            task,
+                                                            "ongoing",
+                                                        )}
+                                                >
+                                                    <Clock
+                                                        class="mr-2 h-4 w-4"
+                                                    />
+                                                    Mark Ongoing
+                                                </DropdownMenu.Item>
+                                            {/if}
+
                                             <DropdownMenu.Separator />
                                             <DropdownMenu.Item
                                                 class="text-destructive font-bold"
@@ -662,7 +845,7 @@
                                     <Badge
                                         variant="secondary"
                                         class="group-hover:bg-primary group-hover:text-primary-foreground text-[10px]"
-                                        >1</Badge
+                                        >{cat.count}</Badge
                                     >
                                 </button>
                             {/each}
@@ -893,7 +1076,7 @@
                             {selectedTask.due_date
                                 ? new Date(
                                       selectedTask.due_date,
-                                  ).toLocaleDateString("id-ID", {
+                                  ).toLocaleDateString("en-US", {
                                       weekday: "long",
                                       year: "numeric",
                                       month: "long",
@@ -906,7 +1089,7 @@
                             {selectedTask.due_date
                                 ? new Date(
                                       selectedTask.due_date,
-                                  ).toLocaleTimeString("id-ID", {
+                                  ).toLocaleTimeString("en-US", {
                                       hour: "2-digit",
                                       minute: "2-digit",
                                   })
@@ -974,36 +1157,46 @@
 {#if selectedIds.length > 0}
     <div class="fixed bottom-8 left-1/2 -translate-x-1/2 z-50">
         <div
-            class="bg-primary text-primary-foreground px-4 md:px-6 py-3 rounded-full shadow-2xl flex items-center gap-4 border border-border"
+            class="bg-primary text-primary-foreground px-4 md:px-6 py-3 rounded-full shadow-2xl flex items-center gap-2 md:gap-4 border border-border"
         >
-            <span class="text-xs md:text-sm font-bold tracking-tight uppercase">
+            <span
+                class="text-xs md:text-sm font-bold tracking-tight uppercase whitespace-nowrap"
+            >
                 {selectedIds.length} Selected
             </span>
 
             <Separator
                 orientation="vertical"
-                class="h-4 bg-primary-foreground/30"
+                class="h-4 bg-primary-foreground/30 hidden md:block"
             />
 
-            <Button
-                variant="secondary"
-                size="sm"
-                class="h-8 rounded-full font-bold px-4 text-[10px] md:text-xs"
-                onclick={bulkMarkDone}
-            >
-                <Check class="mr-2 h-3 w-3" /> Mark Done
-            </Button>
+            <div class="flex items-center gap-1 md:gap-2">
+                <Button
+                    variant="secondary"
+                    size="sm"
+                    class="h-8 rounded-full font-bold px-3 text-[10px] md:text-xs"
+                    onclick={() => bulkUpdateStatus("ongoing")}
+                >
+                    <Clock class="mr-1 h-3 w-3" /> Start
+                </Button>
+                <Button
+                    variant="secondary"
+                    size="sm"
+                    class="h-8 rounded-full font-bold px-3 text-[10px] md:text-xs"
+                    onclick={() => bulkUpdateStatus("done")}
+                >
+                    <Check class="mr-1 h-3 w-3" /> Done
+                </Button>
+            </div>
 
             <Button
                 variant="destructive"
                 size="sm"
-                class="h-8 rounded-full font-black px-4 text-[10px] md:text-xs hover:bg-destructive/90"
-                onclick={() => {
-                    selectedIds.forEach((id) => deleteTask(id));
-                    selectedIds = [];
-                }}
+                class="h-8 rounded-full font-black px-3 text-[10px] md:text-xs hover:bg-destructive/90"
+                onclick={handleBulkDelete}
             >
-                Delete All
+                <Trash2 class="h-3 w-3 md:mr-2" />
+                <span class="hidden md:inline">Delete</span>
             </Button>
         </div>
     </div>
