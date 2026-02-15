@@ -6,13 +6,13 @@
     import * as DropdownMenu from "$lib/components/ui/dropdown-menu";
     import * as Sheet from "$lib/components/ui/sheet";
     import * as Pagination from "$lib/components/ui/pagination";
+    import * as AlertDialog from "$lib/components/ui/alert-dialog";
     import * as Dialog from "$lib/components/ui/dialog";
     import * as Select from "$lib/components/ui/select";
     import { Input } from "$lib/components/ui/input";
     import { Label } from "$lib/components/ui/label";
     import { Textarea } from "$lib/components/ui/textarea";
     import { Separator } from "$lib/components/ui/separator";
-    import { Calendar } from "$lib/components/ui/calendar";
     import {
         Plus,
         Edit,
@@ -22,182 +22,205 @@
         Tag,
         AlignLeft,
         CheckCircle2,
-        ChevronRight,
         ChevronDown,
         Calendar as CalendarIcon,
         Search,
         Trash2,
         Eye,
-        Save,
         X,
-        Hash,
         Filter,
         ListFilter,
     } from "lucide-svelte";
     import { toast } from "svelte-sonner";
+    import { taskService } from "$lib/services/taskService";
+    import { categoryService } from "$lib/services/categoryService";
+    import { userStore } from "$lib/stores/userStore.svelte";
+    import type { Task, Category } from "$lib/types";
 
-    // --- 1. DATA & STATE ---
-    let tasks = $state([
-        {
-            id: 1,
-            text: "Setup Project SvelteKit",
-            desc: "Initialize bun and git",
-            done: true,
-            tags: ["Dev", "Urgent"],
-            priority: "High",
-            due_date: "2026-02-14T09:00:00.000Z",
-            longDesc: "Install SvelteKit using Bun and setup Tailwind v4.",
-        },
-        {
-            id: 2,
-            text: "Integrate Shadcn UI",
-            desc: "Install themes and components",
-            done: true,
-            tags: ["UI"],
-            priority: "Medium",
-            due_date: "2026-02-14T11:00:00.000Z",
-            longDesc: "Add components and themes.",
-        },
-        // ... (truncated dummy data would go here, effectively omitted for brevity as I'm replacing the block)
-    ]);
-
-    let categories = $state([
-        { name: "Dev", color: "bg-blue-500" },
-        { name: "UI", color: "bg-pink-500" },
-        { name: "Backend", color: "bg-orange-500" },
-        { name: "Urgent", color: "bg-red-500" },
-        { name: "Database", color: "bg-emerald-500" },
-    ]);
+    // --- 1. STATE ---
+    let tasks = $state<Task[]>([]);
+    let categories = $state<Category[]>([]);
+    let isLoading = $state(true);
 
     // Filter States
     let searchQuery = $state("");
-    let statusFilter = $state("all"); // all, pending, done
-    let priorityFilter = $state("all"); // all, High, Medium, Low
+    let priorityFilter = $state("all"); // 'all', 'High', 'Medium', 'Low'
 
-    // CRUD States (Sama seperti Dashboard)
+    // Selection & Dialog States
     let newTask = $state({
         text: "",
-        desc: "",
-        longDesc: "",
+        desc: "", // Maps to short_desc
+        longDesc: "", // Maps to long_desc
         priority: "Medium",
         due_date: "",
         tags: [] as string[],
     });
     let tagInput = $state("");
-    let selectedIds = $state<number[]>([]);
-    let selectedTask = $state<any>(null);
+
+    // Selection & Dialog States
+    let selectedTask = $state<Task | null>(null);
     let isDetailOpen = $state(false);
     let isAddDialogOpen = $state(false);
     let isEditMode = $state(false);
     let editingTaskId = $state<number | null>(null);
 
-    // --- 2. LOGIC ---
-    // Filtering Logic
-    const filteredTasks = $derived(
+    // Delete Confirmation State
+    let isDeleteDialogOpen = $state(false);
+    let taskToDeleteId = $state<number | null>(null);
+
+    // --- 2. FETCH DATA ---
+    $effect(() => {
+        const userId = userStore.profile?.ID;
+        if (!userId) return;
+
+        async function init() {
+            try {
+                const [taskRes, catRes] = await Promise.all([
+                    taskService.getTasks(),
+                    categoryService.getCategories(),
+                ]);
+
+                if (taskRes.success) tasks = taskRes.data || [];
+                if (catRes.success) categories = catRes.data || [];
+            } catch (error) {
+                console.error("Failed to load tasks", error);
+                toast.error("Failed to load data");
+            } finally {
+                isLoading = false;
+            }
+        }
+        init();
+    });
+
+    // --- 3. LOGIC ---
+    // Filter Logic
+    const baseTasks = $derived(
         tasks.filter((t) => {
             const matchesSearch =
-                t.text.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                (t.desc &&
-                    t.desc.toLowerCase().includes(searchQuery.toLowerCase()));
-            const matchesStatus =
-                statusFilter === "all"
-                    ? true
-                    : statusFilter === "done"
-                      ? t.done
-                      : !t.done;
+                t.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                (t.short_desc &&
+                    t.short_desc
+                        .toLowerCase()
+                        .includes(searchQuery.toLowerCase()));
+
             const matchesPriority =
                 priorityFilter === "all" ? true : t.priority === priorityFilter;
-            return matchesSearch && matchesStatus && matchesPriority;
+
+            return matchesSearch && matchesPriority;
         }),
     );
 
-    // Pagination Logic (Based on Filtered Results)
-    let currentPage = $state(1);
-    let perPage = 8; // Tampilkan lebih banyak karena full width
-    const count = $derived(filteredTasks.length);
-    const paginatedTasks = $derived(
-        filteredTasks.slice((currentPage - 1) * perPage, currentPage * perPage),
-    );
+    // Grouping for Kanban
+    const columns = $derived({
+        todo: baseTasks.filter((t) => t.status === "todo"),
+        ongoing: baseTasks.filter((t) => t.status === "ongoing"),
+        done: baseTasks.filter((t) => t.status === "done"),
+    });
 
-    // --- 3. HANDLERS (Reused) ---
-    function openDetail(task: any) {
+    // Helper: Check if Overdue
+    const isOverdue = (task: Task) => {
+        if (!task.due_date || task.status === "done") return false;
+        return new Date(task.due_date) < new Date();
+    };
+
+    // --- 4. HANDLERS ---
+    function openDetail(task: Task) {
         selectedTask = task;
         isDetailOpen = true;
     }
-    function deleteTask(id: number) {
-        tasks = tasks.filter((t) => t.id !== id);
-        toast.error("Task deleted");
+
+    function confirmDelete(id: number) {
+        taskToDeleteId = id;
+        isDeleteDialogOpen = true;
     }
-    function toggleDone(task: any) {
-        const index = tasks.findIndex((t) => t.id === task.id);
-        if (index !== -1) {
-            tasks[index].done = !tasks[index].done;
-            toast.success(
-                tasks[index].done
-                    ? "Task marked as done"
-                    : "Task marked as undone",
-            );
+
+    async function proceedDelete() {
+        if (!taskToDeleteId) return;
+
+        const id = taskToDeleteId;
+        const res = await taskService.deleteTask([id]);
+
+        if (res.success) {
+            tasks = tasks.filter((t) => t.ID !== id);
+            toast.success("Task deleted");
+            // Close detail if deleted task was open
+            if (selectedTask?.ID === id) isDetailOpen = false;
+        } else {
+            toast.error("Failed to delete task");
+        }
+
+        isDeleteDialogOpen = false;
+        taskToDeleteId = null;
+    }
+
+    async function updateStatus(task: Task, newStatus: string) {
+        // Optimistic UI Update
+        const originalTasks = [...tasks];
+        tasks = tasks.map((t) =>
+            t.ID === task.ID ? { ...t, status: newStatus } : t,
+        );
+
+        try {
+            const res = await taskService.updateTask(task.ID, {
+                status: newStatus,
+            } as any);
+            if (res.success) {
+                let msg = "";
+                if (newStatus === "done") msg = "Task completed!";
+                else if (newStatus === "ongoing") msg = "Task started";
+                else msg = "Task moved to Todo";
+
+                toast.success(msg);
+
+                // Update selectedTask if open to reflect changes
+                if (selectedTask?.ID === task.ID) {
+                    selectedTask = { ...selectedTask, status: newStatus };
+                }
+            } else {
+                tasks = originalTasks; // Rollback
+                toast.error("Failed to update status");
+            }
+        } catch (e) {
+            tasks = originalTasks;
+            toast.error("Update failed");
         }
     }
-    function bulkMarkDone() {
-        tasks = tasks.map((t) => {
-            if (selectedIds.includes(t.id)) {
-                return { ...t, done: true };
-            }
-            return t;
-        });
-        selectedIds = [];
-        toast.success("Selected tasks marked as done");
-    }
+
+    // Tag & Form Handlers
     function toggleTag(tagName: string) {
-        if (newTask.tags.includes(tagName))
+        if (newTask.tags.includes(tagName)) {
             newTask.tags = newTask.tags.filter((t) => t !== tagName);
-        else newTask.tags.push(tagName);
+        } else {
+            newTask.tags = [...newTask.tags, tagName];
+        }
     }
+
     function addCustomTag(e: KeyboardEvent) {
         if (e.key === "Enter" && tagInput.trim()) {
             e.preventDefault();
-            if (!newTask.tags.includes(tagInput.trim()))
-                newTask.tags.push(tagInput.trim());
+            if (!newTask.tags.includes(tagInput.trim())) {
+                newTask.tags = [...newTask.tags, tagInput.trim()];
+            }
             tagInput = "";
         }
     }
 
-    function openEditDialog(task: any) {
+    function openEditDialog(task: Task) {
         isEditMode = true;
-        editingTaskId = task.id;
+        editingTaskId = task.ID;
         newTask = {
-            text: task.text,
-            desc: task.desc || "",
-            longDesc: task.longDesc || "",
+            text: task.title,
+            desc: task.short_desc || "",
+            longDesc: task.long_desc || "",
             priority: task.priority,
-            due_date: task.due_date
-                ? new Date(
-                      new Date(task.due_date).getTime() -
-                          new Date(task.due_date).getTimezoneOffset() * 60000,
-                  )
-                      .toISOString()
-                      .slice(0, 16)
-                : "",
-            tags: [...task.tags],
+            due_date: task.due_date ? task.due_date.substring(0, 16) : "",
+            tags: [...(task.tags || [])],
         };
         isAddDialogOpen = true;
         isDetailOpen = false;
     }
 
-    function handleSaveTask(e: Event) {
-        e.preventDefault();
-        if (isEditMode && editingTaskId) {
-            const index = tasks.findIndex((t) => t.id === editingTaskId);
-            if (index !== -1) {
-                tasks[index] = { ...tasks[index], ...newTask };
-                toast.success("Saved changes");
-            }
-        } else {
-            tasks.push({ id: Date.now(), ...newTask, done: false });
-            toast.success("Task added to list");
-        }
-        isAddDialogOpen = false;
+    function openAddDialog() {
         isEditMode = false;
         editingTaskId = null;
         newTask = {
@@ -208,6 +231,49 @@
             due_date: "",
             tags: [],
         };
+        isAddDialogOpen = true;
+    }
+
+    async function handleSaveTask(e: Event) {
+        e.preventDefault();
+
+        const payload = {
+            title: newTask.text,
+            short_desc: newTask.desc,
+            long_desc: newTask.longDesc,
+            priority: newTask.priority,
+            tags: newTask.tags,
+            due_date: newTask.due_date
+                ? new Date(newTask.due_date).toISOString()
+                : null,
+            status: isEditMode
+                ? tasks.find((t) => t.ID === editingTaskId)?.status
+                : "todo",
+        };
+
+        try {
+            if (isEditMode && editingTaskId) {
+                const res = await taskService.updateTask(
+                    editingTaskId,
+                    payload as any,
+                );
+                if (res.success && res.data) {
+                    tasks = tasks.map((t) =>
+                        t.ID === editingTaskId ? { ...t, ...res.data } : t,
+                    );
+                    toast.success("Task updated");
+                }
+            } else {
+                const res = await taskService.createTask(payload as any);
+                if (res.success && res.data) {
+                    tasks = [...tasks, res.data]; // Immutable update
+                    toast.success("Task created");
+                }
+            }
+            isAddDialogOpen = false;
+        } catch (error) {
+            toast.error("Failed to save task");
+        }
     }
 
     const priorityColor = (p: string) => {
@@ -218,31 +284,10 @@
     };
 </script>
 
-{#snippet paginationControl()}
-    <Pagination.Root {count} {perPage} bind:page={currentPage}>
-        {#snippet children({ pages, currentPage })}
-            <Pagination.Content>
-                <Pagination.Item><Pagination.Previous /></Pagination.Item>
-                {#each pages as page (page.key)}
-                    {#if page.type === "ellipsis"}<Pagination.Item
-                            ><Pagination.Ellipsis /></Pagination.Item
-                        >
-                    {:else}<Pagination.Item
-                            ><Pagination.Link
-                                {page}
-                                isActive={currentPage === page.value}
-                                >{page.value}</Pagination.Link
-                            ></Pagination.Item
-                        >{/if}
-                {/each}
-                <Pagination.Item><Pagination.Next /></Pagination.Item>
-            </Pagination.Content>
-        {/snippet}
-    </Pagination.Root>
-{/snippet}
-
-<div class="w-full px-2 md:px-6 bg-background min-h-screen pt-4">
-    <div class="flex items-center justify-between gap-4 mb-8">
+<div
+    class="w-full px-2 md:px-6 bg-background min-h-screen lg:min-h-0 lg:h-full pt-4 pb-20 lg:pb-4 flex flex-col lg:overflow-hidden"
+>
+    <div class="flex items-center justify-between gap-4 mb-4 lg:mb-8 shrink-0">
         <div>
             <h1 class="text-2xl md:text-3xl font-bold tracking-tight">
                 All Tasks
@@ -251,13 +296,7 @@
                 Manage and filter your complete task history.
             </p>
         </div>
-        <Button
-            size="sm"
-            onclick={() => {
-                isEditMode = false;
-                isAddDialogOpen = true;
-            }}
-        >
+        <Button size="sm" onclick={openAddDialog}>
             <Plus class="mr-1 h-4 w-4" />
             <span class="hidden md:inline">Create Task</span><span
                 class="md:hidden text-xs">Add</span
@@ -265,41 +304,25 @@
         </Button>
     </div>
 
-    <div class="flex flex-col md:flex-row gap-4 mb-6">
+    <div class="flex flex-col md:flex-row gap-4 mb-6 shrink-0">
         <div class="relative flex-1">
             <Search
                 class="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground"
             />
             <Input
-                placeholder="Search tasks by title or description..."
+                placeholder="Search tasks..."
                 class="pl-9 bg-card"
                 bind:value={searchQuery}
             />
         </div>
         <div class="flex gap-2 shrink-0">
             <div class="w-[130px]">
-                <Select.Root type="single" bind:value={statusFilter}>
-                    <Select.Trigger class="bg-card">
-                        {statusFilter === "all"
-                            ? "All Status"
-                            : statusFilter === "done"
-                              ? "Completed"
-                              : "Pending"}
-                    </Select.Trigger>
-                    <Select.Content>
-                        <Select.Item value="all">All Status</Select.Item>
-                        <Select.Item value="pending">Pending</Select.Item>
-                        <Select.Item value="done">Completed</Select.Item>
-                    </Select.Content>
-                </Select.Root>
-            </div>
-            <div class="w-[130px]">
                 <Select.Root type="single" bind:value={priorityFilter}>
-                    <Select.Trigger class="bg-card">
-                        {priorityFilter === "all"
+                    <Select.Trigger class="bg-card"
+                        >{priorityFilter === "all"
                             ? "All Priority"
-                            : priorityFilter}
-                    </Select.Trigger>
+                            : priorityFilter}</Select.Trigger
+                    >
                     <Select.Content>
                         <Select.Item value="all">All Priority</Select.Item>
                         <Select.Item value="High">High</Select.Item>
@@ -311,344 +334,375 @@
         </div>
     </div>
 
-    <div class="flex flex-col min-h-[500px]">
-        {#if paginatedTasks.length > 0}
-            <div class="flex flex-col gap-3 flex-1">
-                {#each paginatedTasks as task (task.id)}
-                    <Card.Root
-                        class="group transition-all {task.done
-                            ? 'bg-muted/40 opacity-70'
-                            : 'bg-card hover:border-primary/50'}"
-                    >
-                        <Card.Content class="p-0 flex items-stretch">
-                            <div
-                                class="px-3 md:px-4 flex items-center border-r shrink-0"
-                            >
-                                <Checkbox
-                                    checked={selectedIds.includes(task.id)}
-                                    onCheckedChange={(v) => {
-                                        if (v)
-                                            selectedIds = [
-                                                ...selectedIds,
-                                                task.id,
-                                            ];
-                                        else
-                                            selectedIds = selectedIds.filter(
-                                                (id) => id !== task.id,
-                                            );
-                                    }}
-                                />
-                            </div>
-                            <button
-                                type="button"
-                                class="flex-1 p-3 md:p-4 text-left focus:outline-none flex items-center justify-between gap-4 min-w-0"
-                                onclick={() => openDetail(task)}
-                            >
-                                <div class="flex-1 min-w-0">
-                                    <div class="flex items-center gap-2 mb-1">
-                                        <h3
-                                            class="text-sm md:text-base font-semibold truncate {task.done
-                                                ? 'line-through text-muted-foreground'
-                                                : ''}"
-                                        >
-                                            {task.text}
-                                        </h3>
-                                        {#each task.tags as t}
-                                            <Badge
-                                                variant="secondary"
-                                                class="text-[8px] px-1.5 h-4 font-bold uppercase"
-                                                >{t}</Badge
-                                            >
-                                        {/each}
-                                    </div>
-                                    <p
-                                        class="text-muted-foreground text-[10px] md:text-xs italic line-clamp-1"
-                                    >
-                                        "{task.desc}"
-                                    </p>
-                                </div>
-                                <div
-                                    class="flex items-center gap-2 md:gap-6 shrink-0 border-l pl-3 md:pl-4"
-                                >
-                                    <div
-                                        class="hidden lg:flex items-center gap-1 text-[10px] text-muted-foreground font-medium mr-4"
-                                    >
-                                        {#if task.due_date}
-                                            <CalendarIcon class="h-3 w-3" />
-                                            {new Date(
-                                                task.due_date,
-                                            ).toLocaleDateString("en-US", {
-                                                month: "short",
-                                                day: "numeric",
-                                                year: "numeric",
-                                            })}
-                                        {/if}
-                                    </div>
-                                    <div
-                                        class="flex flex-col items-center gap-1"
-                                    >
-                                        <Badge
-                                            variant="outline"
-                                            class="font-bold text-[8px] md:text-[9px] uppercase {priorityColor(
-                                                task.priority,
-                                            )}">{task.priority}</Badge
-                                        >
-                                        <div
-                                            class="flex items-center gap-1 text-[9px] md:text-[10px] text-muted-foreground font-bold font-mono"
-                                        >
-                                            {#if task.due_date}
-                                                <Clock class="h-3 w-3" />
-                                                {new Date(
-                                                    task.due_date,
-                                                ).toLocaleTimeString("id-ID", {
-                                                    hour: "2-digit",
-                                                    minute: "2-digit",
-                                                })}
-                                            {/if}
-                                        </div>
-                                    </div>
-                                    <ChevronRight
-                                        class="h-4 w-4 text-muted-foreground hidden md:block opacity-0 group-hover:opacity-100 transition-opacity"
-                                    />
-                                </div>
-                            </button>
-                            <div
-                                class="pr-2 flex items-center border-l md:border-none"
-                            >
-                                <DropdownMenu.Root>
-                                    <DropdownMenu.Trigger
-                                        ><Button
-                                            variant="ghost"
-                                            size="icon"
-                                            class="h-8 w-8 rounded-full"
-                                            ><MoreVertical
-                                                class="h-4 w-4"
-                                            /></Button
-                                        ></DropdownMenu.Trigger
-                                    >
-                                    <DropdownMenu.Content
-                                        align="end"
-                                        class="w-40 bg-background"
-                                    >
-                                        <DropdownMenu.Item
-                                            onclick={() => openDetail(task)}
-                                            ><Eye class="mr-2 h-4 w-4" /> View Details</DropdownMenu.Item
-                                        >
-                                        <DropdownMenu.Item
-                                            onclick={() => openEditDialog(task)}
-                                            ><Edit class="mr-2 h-4 w-4" /> Edit Task</DropdownMenu.Item
-                                        >
-                                        <DropdownMenu.Item
-                                            onclick={() => toggleDone(task)}
-                                        >
-                                            <Check class="mr-2 h-4 w-4" />
-                                            {task.done
-                                                ? "Mark as Undone"
-                                                : "Mark as Done"}
-                                        </DropdownMenu.Item>
-                                        <DropdownMenu.Separator />
-                                        <DropdownMenu.Item
-                                            class="text-destructive font-bold"
-                                            onclick={() => deleteTask(task.id)}
-                                            ><Trash2 class="mr-2 h-4 w-4" /> Delete
-                                            Task</DropdownMenu.Item
-                                        >
-                                    </DropdownMenu.Content>
-                                </DropdownMenu.Root>
-                            </div>
-                        </Card.Content>
-                    </Card.Root>
-                {/each}
-            </div>
-
-            <div class="pt-8 flex justify-center mt-auto">
-                {@render paginationControl()}
-            </div>
-        {:else}
+    <div
+        class="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:flex-1 lg:min-h-0 lg:h-full"
+    >
+        <!-- TODO COLUMN -->
+        <div class="flex flex-col gap-4 lg:h-full lg:overflow-hidden">
             <div
-                class="flex flex-col items-center justify-center h-[400px] text-center border-2 border-dashed rounded-xl bg-muted/10"
+                class="flex items-center justify-between pb-2 border-b shrink-0"
             >
-                <div class="bg-background p-4 rounded-full mb-4 shadow-sm">
-                    <ListFilter class="h-8 w-8 text-muted-foreground/50" />
-                </div>
-                <h3 class="font-bold text-lg">No tasks found</h3>
-                <p
-                    class="text-sm text-muted-foreground max-w-[250px] mt-1 mb-6"
+                <h2
+                    class="font-bold text-sm uppercase tracking-wider text-muted-foreground flex items-center gap-2"
                 >
-                    Try adjusting your search or filters.
-                </p>
-                <Button
-                    variant="outline"
-                    onclick={() => {
-                        searchQuery = "";
-                        statusFilter = "all";
-                        priorityFilter = "all";
-                    }}>Clear Filters</Button
-                >
+                    <div
+                        class="h-2 w-2 rounded-full bg-muted-foreground/50"
+                    ></div>
+                    Todo
+                    <Badge
+                        variant="secondary"
+                        class="ml-1 text-[10px] h-5 px-1.5"
+                        >{columns.todo.length}</Badge
+                    >
+                </h2>
             </div>
-        {/if}
+            <div
+                class="flex flex-col gap-3 lg:flex-1 lg:overflow-y-auto lg:min-h-0 lg:pr-2 custom-scrollbar"
+            >
+                {#each columns.todo as task (task.ID)}
+                    {@render taskCard(task, "todo")}
+                {/each}
+                {#if columns.todo.length === 0}
+                    <div
+                        class="h-32 rounded-xl border-2 border-dashed flex items-center justify-center text-muted-foreground/50 text-xs italic bg-muted/5 shrink-0"
+                    >
+                        No tasks
+                    </div>
+                {/if}
+            </div>
+        </div>
+
+        <!-- ONGOING COLUMN -->
+        <div class="flex flex-col gap-4 lg:h-full lg:overflow-hidden">
+            <div
+                class="flex items-center justify-between pb-2 border-b border-blue-500/30 shrink-0"
+            >
+                <h2
+                    class="font-bold text-sm uppercase tracking-wider text-blue-500 flex items-center gap-2"
+                >
+                    <div
+                        class="h-2 w-2 rounded-full bg-blue-500 animate-pulse"
+                    ></div>
+                    Ongoing
+                    <Badge
+                        variant="outline"
+                        class="ml-1 text-[10px] h-5 px-1.5 border-blue-500/30 text-blue-500"
+                        >{columns.ongoing.length}</Badge
+                    >
+                </h2>
+            </div>
+            <div
+                class="flex flex-col gap-3 lg:flex-1 lg:overflow-y-auto lg:min-h-0 lg:pr-2 custom-scrollbar"
+            >
+                {#each columns.ongoing as task (task.ID)}
+                    {@render taskCard(task, "ongoing")}
+                {/each}
+                {#if columns.ongoing.length === 0}
+                    <div
+                        class="h-32 rounded-xl border-2 border-dashed border-blue-500/20 flex flex-col items-center justify-center text-blue-500/50 text-xs italic bg-blue-500/5 shrink-0"
+                    >
+                        <Clock class="h-8 w-8 mb-2 opacity-50" /> No active focus
+                    </div>
+                {/if}
+            </div>
+        </div>
+
+        <!-- DONE COLUMN -->
+        <div class="flex flex-col gap-4 lg:h-full lg:overflow-hidden">
+            <div
+                class="flex items-center justify-between pb-2 border-b shrink-0"
+            >
+                <h2
+                    class="font-bold text-sm uppercase tracking-wider text-muted-foreground flex items-center gap-2"
+                >
+                    <div class="h-2 w-2 rounded-full bg-green-500/50"></div>
+                    Completed
+                    <Badge
+                        variant="secondary"
+                        class="ml-1 text-[10px] h-5 px-1.5"
+                        >{columns.done.length}</Badge
+                    >
+                </h2>
+            </div>
+            <div
+                class="flex flex-col gap-3 lg:flex-1 lg:overflow-y-auto lg:min-h-0 lg:pr-2 custom-scrollbar"
+            >
+                {#each columns.done as task (task.ID)}
+                    {@render taskCard(task, "done")}
+                {/each}
+                {#if columns.done.length === 0}
+                    <div
+                        class="h-32 rounded-xl border-2 border-dashed flex items-center justify-center text-muted-foreground/50 text-xs italic bg-muted/5 shrink-0"
+                    >
+                        No completed tasks
+                    </div>
+                {/if}
+            </div>
+        </div>
     </div>
 </div>
 
-<Dialog.Root bind:open={isAddDialogOpen}>
-    <Dialog.Content class="sm:max-w-[550px] p-0 overflow-hidden bg-background">
-        <form onsubmit={handleSaveTask}>
-            <div class="p-6 space-y-6">
-                <header>
-                    <Dialog.Title class="text-2xl font-bold"
-                        >{isEditMode ? "Edit Task" : "New Task"}</Dialog.Title
-                    >
-                    <Dialog.Description
-                        >{isEditMode
-                            ? "Update your task details."
-                            : "Create a detailed todo item."}</Dialog.Description
-                    >
-                </header>
-                <div class="space-y-5">
-                    <div class="grid gap-2">
-                        <Label
-                            for="title"
-                            class="text-[10px] uppercase font-black text-muted-foreground tracking-widest"
-                            >Title</Label
-                        ><Input
-                            id="title"
-                            bind:value={newTask.text}
-                            placeholder="What needs to be done?"
-                            required
-                            class="text-lg font-bold bg-muted/20"
-                        />
-                    </div>
-                    <div class="grid gap-2">
-                        <Label
-                            for="desc"
-                            class="text-[10px] uppercase font-black text-muted-foreground tracking-widest"
-                            >Short Description</Label
-                        ><Input
-                            id="desc"
-                            bind:value={newTask.desc}
-                            placeholder="Dashboard card summary..."
-                            class="bg-muted/10 border-dashed"
-                        />
-                    </div>
-                    <div class="grid gap-3">
-                        <Label
-                            class="text-[10px] uppercase font-black text-muted-foreground tracking-widest"
-                            >Labels</Label
+{#snippet taskCard(task: Task, colType: string)}
+    <Card.Root
+        class="group transition-all hover:shadow-md relative overflow-hidden {colType ===
+        'ongoing'
+            ? 'bg-blue-500/5 border-blue-500/30 shadow-sm'
+            : colType === 'done'
+              ? 'opacity-60 bg-muted/20'
+              : 'bg-card hover:border-primary/50'}"
+    >
+        {#if colType === "ongoing"}<div
+                class="absolute inset-y-0 left-0 w-1 bg-blue-500"
+            ></div>{/if}
+
+        <Card.Content class="p-3 md:p-4 flex flex-col gap-3">
+            <div class="flex items-start justify-between gap-2">
+                <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2 mb-1">
+                        <h3
+                            class="text-sm font-bold truncate {task.status ===
+                            'done'
+                                ? 'line-through text-muted-foreground'
+                                : ''}"
                         >
-                        <div
-                            class="flex flex-wrap gap-2 p-3 bg-muted/20 rounded-xl border border-dashed min-h-14 items-center"
+                            {task.title}
+                        </h3>
+                    </div>
+                    {#if task.short_desc}
+                        <p
+                            class="text-[10px] text-muted-foreground line-clamp-2 mb-2"
                         >
-                            {#each newTask.tags as t}<Badge
-                                    variant="secondary"
-                                    class="gap-1 pl-2 font-bold uppercase text-[10px] animate-in zoom-in-95"
-                                    >{t}
-                                    <button
-                                        type="button"
-                                        onclick={() => toggleTag(t)}
-                                        class="hover:text-destructive"
-                                        ><X class="h-3 w-3" /></button
-                                    ></Badge
-                                >{:else}<span
-                                    class="text-xs text-muted-foreground/50 italic px-1"
-                                    >Pick from suggestions...</span
-                                >{/each}
-                        </div>
-                        <div class="flex flex-wrap gap-1.5">
-                            {#each categories as cat}<button
-                                    type="button"
-                                    onclick={() => toggleTag(cat.name)}
-                                    class="px-2.5 py-1 rounded-full text-[10px] font-bold border transition-all {newTask.tags.includes(
-                                        cat.name,
-                                    )
-                                        ? 'bg-primary text-primary-foreground border-primary shadow-sm'
-                                        : 'bg-background hover:border-primary text-muted-foreground'}"
-                                    >{cat.name}</button
-                                >{/each}
-                            <div class="flex items-center border-l pl-2 ml-1">
-                                <input
-                                    placeholder="+ New Label"
-                                    class="bg-transparent outline-none text-[10px] w-20 font-medium placeholder:italic"
-                                    bind:value={tagInput}
-                                    onkeydown={addCustomTag}
-                                />
-                            </div>
-                        </div>
-                    </div>
-                    <div class="grid grid-cols-2 gap-4">
-                        <div class="grid gap-2">
-                            <Label
-                                for="due_date"
-                                class="text-[10px] uppercase font-black text-muted-foreground"
-                                >Due Date & Time</Label
-                            >
-                            <div class="relative">
-                                <Input
-                                    id="due_date"
-                                    type="datetime-local"
-                                    bind:value={newTask.due_date}
-                                    class="bg-muted/10 custom-time-input"
-                                />
-                                <CalendarIcon
-                                    class="absolute right-3 top-3 h-4 w-4 text-muted-foreground opacity-50 pointer-events-none"
-                                />
-                            </div>
-                        </div>
-                        <div class="grid gap-2">
-                            <Label
-                                for="priority"
-                                class="text-[10px] uppercase font-black text-muted-foreground"
-                                >Priority</Label
-                            >
-                            <DropdownMenu.Root>
-                                <DropdownMenu.Trigger
-                                    class={buttonVariants({
-                                        variant: "outline",
-                                    }) +
-                                        " w-full !justify-between bg-muted/10 border-input font-normal hover:bg-muted/20 capitalize"}
-                                    >{newTask.priority}
-                                    <ChevronDown
-                                        class="ml-2 h-4 w-4 opacity-50"
-                                    /></DropdownMenu.Trigger
+                            {task.short_desc}
+                        </p>
+                    {/if}
+                </div>
+
+                <div class="flex items-center">
+                    <DropdownMenu.Root>
+                        <DropdownMenu.Trigger>
+                            {#snippet child({ props })}
+                                <Button
+                                    {...props}
+                                    variant="ghost"
+                                    size="icon"
+                                    class="h-6 w-6 ml-1"
                                 >
-                                <DropdownMenu.Content
-                                    class="w-[200px] bg-background border shadow-xl"
-                                    ><DropdownMenu.RadioGroup
-                                        bind:value={newTask.priority}
-                                        ><DropdownMenu.RadioItem value="High"
-                                            >High</DropdownMenu.RadioItem
-                                        ><DropdownMenu.RadioItem value="Medium"
-                                            >Medium</DropdownMenu.RadioItem
-                                        ><DropdownMenu.RadioItem value="Low"
-                                            >Low</DropdownMenu.RadioItem
-                                        ></DropdownMenu.RadioGroup
-                                    ></DropdownMenu.Content
+                                    <MoreVertical class="h-3 w-3" />
+                                </Button>
+                            {/snippet}
+                        </DropdownMenu.Trigger>
+                        <DropdownMenu.Content align="end">
+                            <DropdownMenu.Item onclick={() => openDetail(task)}
+                                ><Eye class="mr-2 h-4 w-4" /> View</DropdownMenu.Item
+                            >
+                            <DropdownMenu.Item
+                                onclick={() => openEditDialog(task)}
+                                ><Edit class="mr-2 h-4 w-4" /> Edit</DropdownMenu.Item
+                            >
+
+                            <!-- Context Aware Status Actions -->
+                            {#if task.status === "todo"}
+                                <DropdownMenu.Item
+                                    onclick={() =>
+                                        updateStatus(task, "ongoing")}
                                 >
-                            </DropdownMenu.Root>
-                        </div>
-                    </div>
-                    <div class="grid gap-2">
-                        <Label
-                            for="longDesc"
-                            class="text-[10px] uppercase font-black text-muted-foreground"
-                            >Detailed Description</Label
-                        ><Textarea
-                            id="longDesc"
-                            bind:value={newTask.longDesc}
-                            rows={4}
-                            class="bg-muted/10 resize-none"
-                        />
-                    </div>
+                                    <Clock class="mr-2 h-4 w-4" /> Start Task
+                                </DropdownMenu.Item>
+                                <DropdownMenu.Item
+                                    onclick={() => updateStatus(task, "done")}
+                                >
+                                    <Check class="mr-2 h-4 w-4" /> Mark Done
+                                </DropdownMenu.Item>
+                            {:else if task.status === "ongoing"}
+                                <DropdownMenu.Item
+                                    onclick={() => updateStatus(task, "todo")}
+                                >
+                                    <X class="mr-2 h-4 w-4" /> Pause (Todo)
+                                </DropdownMenu.Item>
+                                <DropdownMenu.Item
+                                    onclick={() => updateStatus(task, "done")}
+                                >
+                                    <Check class="mr-2 h-4 w-4" /> Mark Done
+                                </DropdownMenu.Item>
+                            {:else}
+                                <DropdownMenu.Item
+                                    onclick={() => updateStatus(task, "todo")}
+                                >
+                                    <X class="mr-2 h-4 w-4" /> Reopen (Todo)
+                                </DropdownMenu.Item>
+                                <DropdownMenu.Item
+                                    onclick={() =>
+                                        updateStatus(task, "ongoing")}
+                                >
+                                    <Clock class="mr-2 h-4 w-4" /> Move to Ongoing
+                                </DropdownMenu.Item>
+                            {/if}
+
+                            <DropdownMenu.Separator />
+                            <DropdownMenu.Item
+                                class="text-destructive"
+                                onclick={() => confirmDelete(task.ID)}
+                                ><Trash2 class="mr-2 h-4 w-4" /> Delete</DropdownMenu.Item
+                            >
+                        </DropdownMenu.Content>
+                    </DropdownMenu.Root>
                 </div>
             </div>
-            <Dialog.Footer class="bg-muted/30 p-6 border-t"
-                ><Button
-                    type="button"
+
+            <div class="flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                    {#if task.tags && task.tags.length > 0}
+                        <div class="flex flex-wrap gap-1">
+                            {#each task.tags.slice(0, 2) as t}
+                                <Badge
+                                    variant="secondary"
+                                    class="text-[8px] px-1 h-4 font-bold uppercase"
+                                    >{t}</Badge
+                                >
+                            {/each}
+                        </div>
+                    {/if}
+                    {#if isOverdue(task)}
+                        <Badge
+                            variant="destructive"
+                            class="text-[8px] h-4 px-1 animate-pulse"
+                            >LATE</Badge
+                        >
+                    {/if}
+                </div>
+
+                <div class="flex items-center gap-2">
+                    {#if task.due_date}
+                        <div
+                            class="flex items-center gap-1 text-[10px] {isOverdue(
+                                task,
+                            )
+                                ? 'text-destructive font-bold'
+                                : 'text-muted-foreground'}"
+                        >
+                            <Clock class="h-3 w-3" />
+                            {new Date(task.due_date).toLocaleDateString(
+                                "en-US",
+                                { day: "numeric", month: "short" },
+                            )}
+                        </div>
+                    {/if}
+                    <Badge
+                        variant="outline"
+                        class="text-[8px] px-1 h-4 font-bold uppercase {priorityColor(
+                            task.priority,
+                        )}">{task.priority}</Badge
+                    >
+                </div>
+            </div>
+        </Card.Content>
+    </Card.Root>
+{/snippet}
+
+<!-- Dialogs are outside -->
+<Dialog.Root bind:open={isAddDialogOpen}>
+    <Dialog.Content class="sm:max-w-[550px] bg-background">
+        <form onsubmit={handleSaveTask}>
+            <Dialog.Header>
+                <Dialog.Title
+                    >{isEditMode ? "Edit Task" : "New Task"}</Dialog.Title
+                >
+            </Dialog.Header>
+            <div class="grid gap-4 py-4">
+                <div class="grid gap-2">
+                    <Label>Title</Label>
+                    <Input
+                        bind:value={newTask.text}
+                        placeholder="Task title..."
+                        required
+                        class="font-bold"
+                    />
+                </div>
+                <div class="grid gap-2">
+                    <Label>Short Description</Label>
+                    <Input
+                        bind:value={newTask.desc}
+                        placeholder="Brief summary..."
+                    />
+                </div>
+                <div class="grid gap-2">
+                    <Label>Labels</Label>
+                    <div
+                        class="flex flex-wrap gap-2 p-2 border rounded-md min-h-10 items-center"
+                    >
+                        {#each newTask.tags as t}
+                            <Badge variant="secondary"
+                                >{t}
+                                <button
+                                    type="button"
+                                    onclick={() => toggleTag(t)}
+                                    class="ml-1"><X class="h-3 w-3" /></button
+                                ></Badge
+                            >
+                        {/each}
+                        <input
+                            placeholder="+ Tag"
+                            class="bg-transparent outline-none text-xs min-w-[60px]"
+                            bind:value={tagInput}
+                            onkeydown={addCustomTag}
+                        />
+                    </div>
+                    <div class="flex flex-wrap gap-1">
+                        {#each categories as cat}
+                            <button
+                                type="button"
+                                onclick={() => toggleTag(cat.name)}
+                                class="text-[10px] px-2 py-1 border rounded-full hover:bg-muted {newTask.tags.includes(
+                                    cat.name,
+                                )
+                                    ? 'bg-primary text-primary-foreground'
+                                    : ''}">{cat.name}</button
+                            >
+                        {/each}
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div class="grid gap-2">
+                        <Label>Due Date</Label>
+                        <Input
+                            type="datetime-local"
+                            bind:value={newTask.due_date}
+                            class="custom-time-input"
+                        />
+                    </div>
+                    <div class="grid gap-2">
+                        <Label>Priority</Label>
+                        <Select.Root
+                            type="single"
+                            bind:value={newTask.priority}
+                        >
+                            <Select.Trigger>{newTask.priority}</Select.Trigger>
+                            <Select.Content>
+                                <Select.Item value="High">High</Select.Item>
+                                <Select.Item value="Medium">Medium</Select.Item>
+                                <Select.Item value="Low">Low</Select.Item>
+                            </Select.Content>
+                        </Select.Root>
+                    </div>
+                </div>
+                <div class="grid gap-2">
+                    <Label>Detailed Description</Label>
+                    <Textarea
+                        bind:value={newTask.longDesc}
+                        rows={4}
+                        class="resize-none"
+                    />
+                </div>
+            </div>
+            <Dialog.Footer>
+                <Button
                     variant="outline"
+                    type="button"
                     onclick={() => (isAddDialogOpen = false)}>Cancel</Button
-                ><Button type="submit" class="font-bold shadow-md"
-                    >{isEditMode ? "Update Changes" : "Save Task"}</Button
-                ></Dialog.Footer
-            >
+                >
+                <Button type="submit">{isEditMode ? "Update" : "Create"}</Button
+                >
+            </Dialog.Footer>
         </form>
     </Dialog.Content>
 </Dialog.Root>
@@ -667,10 +721,10 @@
                         )}">{selectedTask.priority} PRIORITY</Badge
                     >
                     <Sheet.Title class="text-3xl font-bold tracking-tight"
-                        >{selectedTask.text}</Sheet.Title
+                        >{selectedTask.title}</Sheet.Title
                     >
                     <div
-                        class="flex items-center gap-4 text-xs font-bold text-muted-foreground uppercase border-y py-4"
+                        class="flex items-center gap-4 text-xs font-bold text-muted-foreground uppercase border-t pt-4"
                     >
                         <span class="flex items-center gap-1.5"
                             ><CalendarIcon class="h-4 w-4 text-primary" />
@@ -678,14 +732,14 @@
                                 ? new Date(
                                       selectedTask.due_date,
                                   ).toLocaleDateString()
-                                : "No date"}</span
+                                : "No Date"}</span
                         >
                         <span class="flex items-center gap-1.5"
                             ><Clock class="h-4 w-4 text-primary" />
                             {selectedTask.due_date
                                 ? new Date(
                                       selectedTask.due_date,
-                                  ).toLocaleTimeString("id-ID", {
+                                  ).toLocaleTimeString([], {
                                       hour: "2-digit",
                                       minute: "2-digit",
                                   })
@@ -693,7 +747,50 @@
                         >
                     </div>
                 </header>
-                {#if selectedTask.longDesc}<section class="space-y-4">
+
+                <section class="space-y-4 border-t pt-4 mt-4">
+                    <div
+                        class="text-[10px] font-black uppercase text-primary tracking-widest"
+                    >
+                        Update Status
+                    </div>
+                    <div class="flex gap-2">
+                        <Button
+                            variant={selectedTask.status === "todo"
+                                ? "default"
+                                : "outline"}
+                            size="sm"
+                            onclick={() => updateStatus(selectedTask!, "todo")}
+                            >Todo</Button
+                        >
+                        <Button
+                            variant={selectedTask.status === "ongoing"
+                                ? "default"
+                                : "outline"}
+                            size="sm"
+                            class={selectedTask.status === "ongoing"
+                                ? "bg-blue-600"
+                                : ""}
+                            onclick={() =>
+                                updateStatus(selectedTask!, "ongoing")}
+                            >Ongoing</Button
+                        >
+                        <Button
+                            variant={selectedTask.status === "done"
+                                ? "default"
+                                : "outline"}
+                            size="sm"
+                            class={selectedTask.status === "done"
+                                ? "bg-green-600"
+                                : ""}
+                            onclick={() => updateStatus(selectedTask!, "done")}
+                            >Done</Button
+                        >
+                    </div>
+                </section>
+
+                {#if selectedTask.long_desc}
+                    <section class="space-y-4 border-t pt-4 mt-4">
                         <div
                             class="flex items-center gap-2 font-black text-[10px] uppercase tracking-widest text-primary"
                         >
@@ -702,35 +799,20 @@
                         <div
                             class="text-sm leading-relaxed text-muted-foreground bg-muted/20 p-6 rounded-2xl border-2 border-dashed border-muted italic font-medium"
                         >
-                            "{selectedTask.longDesc}"
+                            "{selectedTask.long_desc}"
                         </div>
-                    </section>{/if}
-                <section class="space-y-4">
-                    <div
-                        class="flex items-center gap-2 font-black text-[10px] uppercase tracking-widest text-primary"
-                    >
-                        <Tag class="h-4 w-4" /> Labels
-                    </div>
-                    <div class="flex flex-wrap gap-2">
-                        {#each selectedTask.tags as t}<Badge
-                                variant="secondary"
-                                class="font-bold uppercase text-[10px] border"
-                                >{t}</Badge
-                            >{:else}<span
-                                class="text-xs text-muted-foreground italic"
-                                >No labels assigned.</span
-                            >{/each}
-                    </div>
-                </section>
+                    </section>
+                {/if}
             </div>
             <div class="p-6 border-t flex gap-3 bg-muted/5">
                 <Button
                     variant="outline"
                     class="flex-1"
                     onclick={() => (isDetailOpen = false)}>Close</Button
-                ><Button
+                >
+                <Button
                     class="flex-1 font-bold shadow-md"
-                    onclick={() => openEditDialog(selectedTask)}
+                    onclick={() => openEditDialog(selectedTask!)}
                     ><Edit class="mr-2 h-4 w-4" /> Edit Task</Button
                 >
             </div>
@@ -738,39 +820,27 @@
     </Sheet.Content>
 </Sheet.Root>
 
-{#if selectedIds.length > 0}
-    <div class="fixed bottom-8 left-1/2 -translate-x-1/2 z-50">
-        <div
-            class="bg-primary text-primary-foreground px-4 md:px-6 py-3 rounded-full shadow-2xl flex items-center gap-4 border border-white/10"
-        >
-            <span class="text-xs md:text-sm font-bold tracking-tight uppercase"
-                >{selectedIds.length} Selected</span
+<!-- Alert Dialog for Delete Confirmation -->
+<AlertDialog.Root bind:open={isDeleteDialogOpen}>
+    <AlertDialog.Content>
+        <AlertDialog.Header>
+            <AlertDialog.Title>Are you absolutely sure?</AlertDialog.Title>
+            <AlertDialog.Description>
+                This action cannot be undone. This will permanently delete the
+                task.
+            </AlertDialog.Description>
+        </AlertDialog.Header>
+        <AlertDialog.Footer>
+            <AlertDialog.Cancel onclick={() => (isDeleteDialogOpen = false)}
+                >Cancel</AlertDialog.Cancel
             >
-            <Separator
-                orientation="vertical"
-                class="h-4 bg-primary-foreground/30"
-            />
-            <Button
-                variant="secondary"
-                size="sm"
-                class="h-8 rounded-full font-bold px-4 text-[10px] md:text-xs text-primary bg-white"
-                onclick={bulkMarkDone}
+            <AlertDialog.Action
+                class="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                onclick={proceedDelete}>Delete</AlertDialog.Action
             >
-                <Check class="mr-2 h-3 w-3" /> Mark Done
-            </Button>
-            <Button
-                variant="destructive"
-                size="sm"
-                class="h-8 rounded-full font-black px-4 text-[10px] md:text-xs"
-                onclick={() => {
-                    tasks = tasks.filter((t) => !selectedIds.includes(t.id));
-                    selectedIds = [];
-                    toast.error("Tasks deleted");
-                }}>Delete All</Button
-            >
-        </div>
-    </div>
-{/if}
+        </AlertDialog.Footer>
+    </AlertDialog.Content>
+</AlertDialog.Root>
 
 <style>
     :global(.custom-time-input::-webkit-calendar-picker-indicator) {

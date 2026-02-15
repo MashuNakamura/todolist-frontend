@@ -8,6 +8,7 @@
     import * as Pagination from "$lib/components/ui/pagination";
     import * as ScrollArea from "$lib/components/ui/scroll-area";
     import * as Dialog from "$lib/components/ui/dialog";
+    import * as AlertDialog from "$lib/components/ui/alert-dialog";
     import { Input } from "$lib/components/ui/input";
     import { Label } from "$lib/components/ui/label";
     import { Textarea } from "$lib/components/ui/textarea";
@@ -122,6 +123,22 @@
     let editingTaskId = $state<number | null>(null);
     let isLoading = $state(true);
 
+    let isDeleteDialogOpen = $state(false);
+    let taskToDeleteId = $state<number | null>(null);
+
+    function confirmDelete(id: number) {
+        taskToDeleteId = id;
+        isDeleteDialogOpen = true;
+    }
+
+    async function proceedDelete() {
+        if (taskToDeleteId) {
+            await deleteTask(taskToDeleteId);
+            isDeleteDialogOpen = false;
+            taskToDeleteId = null;
+        }
+    }
+
     // --- FILTERING & SORTING LOGIC ---
 
     // 1. Filter: Remove past tasks (keep today onwards + no date)
@@ -134,24 +151,31 @@
             // Parse due_date (ISO string)
             const taskDate = new Date(t.due_date);
             taskDate.setHours(0, 0, 0, 0); // Compare dates only
-            return taskDate >= now;
+
+            // Show if:
+            // 1. Not Done (Todo/Ongoing) -> Even if overdue.
+            // 2. OR Date >= Today (Done tasks for today visible for progress).
+            return t.status !== "done" || taskDate >= now;
         });
     });
 
-    // 2. Sort: Ongoing > Due Date > Done (Bottom)
+    const isOverdue = (task: Task) => {
+        if (!task.due_date || task.status === "done") return false;
+        const now = new Date();
+        now.setHours(0, 0, 0, 0);
+        const taskDate = new Date(task.due_date);
+        taskDate.setHours(0, 0, 0, 0);
+        return taskDate < now;
+    };
+
+    // 2. Sort: Ongoing > Due Date
     const sortedTasks = $derived.by(() => {
         return [...visibleTasks].sort((a, b) => {
             // Priority 1: Ongoing at top
             if (a.status === "ongoing" && b.status !== "ongoing") return -1;
             if (b.status === "ongoing" && a.status !== "ongoing") return 1;
 
-            // Priority 3: Done at bottom
-            if (a.status === "done" && b.status !== "done") return 1;
-            if (b.status === "done" && a.status !== "done") return -1;
-
             // Priority 2: Nearest Due Date
-            // Handling null/undefined dates (put them last if both not done/ongoing?)
-            // Let's say: Earliest date first. No date lasts.
             const dateA = a.due_date
                 ? new Date(a.due_date).getTime()
                 : Number.MAX_SAFE_INTEGER;
@@ -162,6 +186,11 @@
             return dateA - dateB;
         });
     });
+
+    // 3. Display Tasks (Filter out 'done' for main list)
+    const displayTasks = $derived(
+        sortedTasks.filter((t) => t.status !== "done"),
+    );
 
     // 3. Category Sync: Count ONLY visible tasks
     const syncedCategories = $derived.by(() => {
@@ -176,9 +205,9 @@
     // Pagination
     let currentPage = $state(1);
     let perPage = 5;
-    const count = $derived(sortedTasks.length);
+    const count = $derived(displayTasks.length);
     const paginatedTasks = $derived(
-        sortedTasks.slice((currentPage - 1) * perPage, currentPage * perPage),
+        displayTasks.slice((currentPage - 1) * perPage, currentPage * perPage),
     );
 
     // Filter Categories for Sidebar Search
@@ -308,7 +337,7 @@
 
     // DELETE SINGLE
     async function deleteTask(id: number) {
-        if (!confirm("Delete this task?")) return;
+        // if (!confirm("Delete this task?")) return; // Replaced with AlertDialog
 
         try {
             const res = await taskService.deleteTask([id]);
@@ -572,7 +601,7 @@
                             class="group transition-all {task.status === 'done'
                                 ? 'bg-muted/40 opacity-70'
                                 : task.status === 'ongoing'
-                                  ? 'bg-blue-500/5 border-blue-500/50 shadow-[0_0_15px_rgba(59,130,246,0.1)]'
+                                  ? 'bg-blue-500/5 border-l-4 border-l-blue-500 shadow-md'
                                   : 'bg-card'}"
                         >
                             <Card.Content class="p-0 flex items-stretch">
@@ -612,6 +641,19 @@
                                             >
                                                 {task.title}
                                             </h3>
+                                            {#if task.status === "ongoing"}
+                                                <Badge
+                                                    class="bg-blue-500 text-[8px] h-4 px-1 animate-pulse"
+                                                    >ONGOING</Badge
+                                                >
+                                            {/if}
+                                            {#if isOverdue(task)}
+                                                <Badge
+                                                    variant="destructive"
+                                                    class="text-[8px] h-4 px-1 animate-pulse"
+                                                    >LATE</Badge
+                                                >
+                                            {/if}
                                             <div class="flex gap-1 shrink-0">
                                                 {#each task.tags.slice(0, 1) as t}
                                                     <Badge
@@ -776,7 +818,7 @@
                                             <DropdownMenu.Item
                                                 class="text-destructive font-bold"
                                                 onclick={() =>
-                                                    deleteTask(task.ID)}
+                                                    confirmDelete(task.ID)}
                                                 ><Trash2 class="mr-2 h-4 w-4" />
                                                 Delete Task</DropdownMenu.Item
                                             >
@@ -1069,7 +1111,7 @@
                         >{selectedTask.title}</Sheet.Title
                     >
                     <div
-                        class="flex items-center gap-4 text-xs font-bold text-muted-foreground uppercase border-y py-4"
+                        class="flex items-center gap-4 text-xs font-bold text-muted-foreground uppercase border-t pt-4"
                     >
                         <span class="flex items-center gap-1.5"
                             ><CalendarIcon class="h-4 w-4 text-primary" />
@@ -1098,8 +1140,49 @@
                     </div>
                 </header>
 
+                <section class="space-y-4 border-t pt-4 mt-4">
+                    <div
+                        class="text-[10px] font-black uppercase text-primary tracking-widest"
+                    >
+                        Update Status
+                    </div>
+                    <div class="flex gap-2">
+                        <Button
+                            variant={selectedTask.status === "todo"
+                                ? "default"
+                                : "outline"}
+                            size="sm"
+                            onclick={() => updateStatus(selectedTask, "todo")}
+                            >Todo</Button
+                        >
+                        <Button
+                            variant={selectedTask.status === "ongoing"
+                                ? "default"
+                                : "outline"}
+                            size="sm"
+                            class={selectedTask.status === "ongoing"
+                                ? "bg-blue-600 hover:bg-blue-700"
+                                : ""}
+                            onclick={() =>
+                                updateStatus(selectedTask, "ongoing")}
+                            >Ongoing</Button
+                        >
+                        <Button
+                            variant={selectedTask.status === "done"
+                                ? "default"
+                                : "outline"}
+                            size="sm"
+                            class={selectedTask.status === "done"
+                                ? "bg-green-600 hover:bg-green-700"
+                                : ""}
+                            onclick={() => updateStatus(selectedTask, "done")}
+                            >Done</Button
+                        >
+                    </div>
+                </section>
+
                 {#if selectedTask.long_desc}
-                    <section class="space-y-4">
+                    <section class="space-y-4 border-t pt-4 mt-4">
                         <div
                             class="flex items-center gap-2 font-black text-[10px] uppercase tracking-widest text-primary"
                         >
@@ -1113,7 +1196,7 @@
                     </section>
                 {/if}
 
-                <section class="space-y-4">
+                <section class="space-y-4 border-t pt-4 mt-4">
                     <div
                         class="flex items-center gap-2 font-black text-[10px] uppercase tracking-widest text-primary"
                     >
@@ -1201,3 +1284,22 @@
         </div>
     </div>
 {/if}
+
+<AlertDialog.Root bind:open={isDeleteDialogOpen}>
+    <AlertDialog.Content>
+        <AlertDialog.Header>
+            <AlertDialog.Title>Are you absolutely sure?</AlertDialog.Title>
+            <AlertDialog.Description>
+                This action cannot be undone. This will permanently delete the
+                task from our servers.
+            </AlertDialog.Description>
+        </AlertDialog.Header>
+        <AlertDialog.Footer>
+            <AlertDialog.Cancel>Cancel</AlertDialog.Cancel>
+            <AlertDialog.Action
+                class="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                onclick={proceedDelete}>Delete</AlertDialog.Action
+            >
+        </AlertDialog.Footer>
+    </AlertDialog.Content>
+</AlertDialog.Root>

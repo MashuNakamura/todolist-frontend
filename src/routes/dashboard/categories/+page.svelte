@@ -3,11 +3,12 @@
     import * as Card from "$lib/components/ui/card";
     import * as DropdownMenu from "$lib/components/ui/dropdown-menu";
     import * as Dialog from "$lib/components/ui/dialog";
+    import * as AlertDialog from "$lib/components/ui/alert-dialog";
     import { Input } from "$lib/components/ui/input";
     import { Label } from "$lib/components/ui/label";
     import { categoryService, taskService } from "$lib";
     import { userStore } from "$lib/stores/userStore.svelte";
-    import type { Category } from "$lib";
+    import type { Task, Category } from "$lib";
     import {
         Plus,
         MoreVertical,
@@ -21,7 +22,7 @@
 
     // --- 1. STATE ---
     // State Form
-    const formData = $state({
+    let formData = $state({
         name: "",
         color: "",
     });
@@ -53,40 +54,54 @@
     let editingId = $state<number | null>(null);
     let isLoading = $state(false);
 
-    let categories = $state<Category[]>([]);
+    let rawCategories = $state<Category[]>([]);
+    let tasks = $state<Task[]>([]);
+
+    let isDeleteDialogOpen = $state(false);
+    let categoryIdToDelete = $state<number | null>(null);
+
+    function confirmDelete(id: number) {
+        categoryIdToDelete = id;
+        isDeleteDialogOpen = true;
+    }
+
+    async function proceedDelete() {
+        if (categoryIdToDelete) {
+            await handleDelete(categoryIdToDelete);
+            isDeleteDialogOpen = false;
+            categoryIdToDelete = null;
+        }
+    }
 
     // --- 2. FETCH DATA ---
     $effect(() => {
-        const userId = userStore.profile.ID;
+        const userId = userStore.profile?.ID;
         if (!userId) return;
 
         Promise.all([
             categoryService.getCategories(),
             taskService.getTasks(),
         ]).then(([catRes, taskRes]) => {
-            if (catRes.success && taskRes.success) {
-                const allCats = catRes.data || [];
-                const allTasks = taskRes.data || [];
-
-                categories = allCats.map((cat: any) => {
-                    const taskCount = allTasks.filter(
-                        (t: any) => t.tags && t.tags.includes(cat.name),
-                    ).length;
-
-                    return {
-                        ID: cat.ID,
-                        name: cat.name,
-                        color: cat.color,
-                        count: taskCount,
-                    };
-                });
-            } else {
-                console.error("Failed to load data");
+            if (catRes.success && catRes.data) {
+                rawCategories = catRes.data;
+            }
+            if (taskRes.success && taskRes.data) {
+                tasks = taskRes.data;
             }
         });
     });
 
     // --- 3. LOGIC ---
+    const categories = $derived(
+        rawCategories.map((cat) => {
+            const count = tasks.filter(
+                (t) =>
+                    t.tags && t.tags.includes(cat.name) && t.status !== "done", // Exclude done tasks
+            ).length;
+            return { ...cat, count };
+        }),
+    );
+
     const filteredCategories = $derived(
         categories.filter((c) =>
             c.name.toLowerCase().includes(searchQuery.toLowerCase()),
@@ -96,30 +111,28 @@
     // --- 4. HANDLERS ---
     function openAddDialog() {
         isEditMode = false;
-        formData.name = "";
-        formData.color = "bg-blue-500";
+        formData = { name: "", color: "bg-blue-500" };
         isDialogOpen = true;
     }
 
-    function openEditDialog(cat: any) {
+    function openEditDialog(cat: Category) {
         isEditMode = true;
         editingId = cat.ID;
-        formData.name = cat.name;
-        formData.color = cat.color;
+        formData = { name: cat.name, color: cat.color };
         isDialogOpen = true;
     }
 
     async function handleDelete(id: number) {
-        // Optimistic UI
-        const originalCategories = [...categories];
-        categories = categories.filter((c) => c.ID !== id);
+        // Confirm moved to AlertDialog
+        // if (!confirm(...)) return;
 
         const res = await categoryService.deleteCategory(id);
 
         if (res.success) {
+            // Immutable Update
+            rawCategories = rawCategories.filter((c) => c.ID !== id);
             toast.success("Category deleted");
         } else {
-            categories = originalCategories;
             toast.error(res.message || "Failed to delete category");
         }
     }
@@ -129,7 +142,7 @@
         isLoading = true;
 
         if (isEditMode && editingId) {
-            const originalCat = categories.find((c) => c.ID === editingId);
+            const originalCat = rawCategories.find((c) => c.ID === editingId);
 
             if (
                 originalCat &&
@@ -156,15 +169,28 @@
 
             if (res.success) {
                 toast.success("Category updated successfully");
-                // Update Local State
-                const index = categories.findIndex((c) => c.ID === editingId);
-                if (index !== -1) {
-                    categories[index] = {
-                        ...categories[index],
-                        name: formData.name,
-                        color: formData.color,
-                    };
+
+                // 1. Update Category (Immutable .map)
+                rawCategories = rawCategories.map((c) =>
+                    c.ID === editingId
+                        ? { ...c, name: formData.name, color: formData.color }
+                        : c,
+                );
+
+                // 2. Sync Rename Task (Update Local Tasks Array)
+                if (originalCat && originalCat.name !== formData.name) {
+                    tasks = tasks.map((t) => {
+                        if (t.tags && t.tags.includes(originalCat.name)) {
+                            // Replace old tag with new tag
+                            const newTags = t.tags.map((tag) =>
+                                tag === originalCat.name ? formData.name : tag,
+                            );
+                            return { ...t, tags: newTags };
+                        }
+                        return t;
+                    });
                 }
+
                 isDialogOpen = false;
             } else {
                 toast.error(res.message || "Failed to update category");
@@ -180,16 +206,8 @@
 
             if (res.success && res.data) {
                 toast.success("New category created");
-                // Push ke Local State
-                categories = [
-                    ...categories,
-                    {
-                        ID: res.data.ID,
-                        name: res.data.name,
-                        color: res.data.color,
-                        count: 0,
-                    },
-                ];
+                // Immutable Update (.spread)
+                rawCategories = [...rawCategories, res.data];
                 isDialogOpen = false;
             } else {
                 toast.error(res.message || "Failed to create category");
@@ -263,7 +281,7 @@
                             <DropdownMenu.Separator />
                             <DropdownMenu.Item
                                 class="text-destructive"
-                                onclick={() => handleDelete(cat.ID)}
+                                onclick={() => confirmDelete(cat.ID)}
                                 ><Trash2 class="mr-2 h-4 w-4" /> Delete</DropdownMenu.Item
                             >
                         </DropdownMenu.Content>
@@ -362,3 +380,23 @@
         </form>
     </Dialog.Content>
 </Dialog.Root>
+
+<AlertDialog.Root bind:open={isDeleteDialogOpen}>
+    <AlertDialog.Content>
+        <AlertDialog.Header>
+            <AlertDialog.Title>Are you absolutely sure?</AlertDialog.Title>
+            <AlertDialog.Description>
+                This action cannot be undone. This will permanently delete the
+                category. Tasks with this label will strictly keep their label,
+                but the category itself will be removed.
+            </AlertDialog.Description>
+        </AlertDialog.Header>
+        <AlertDialog.Footer>
+            <AlertDialog.Cancel>Cancel</AlertDialog.Cancel>
+            <AlertDialog.Action
+                class="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                onclick={proceedDelete}>Delete</AlertDialog.Action
+            >
+        </AlertDialog.Footer>
+    </AlertDialog.Content>
+</AlertDialog.Root>

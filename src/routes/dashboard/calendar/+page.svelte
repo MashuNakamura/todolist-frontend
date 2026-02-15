@@ -23,6 +23,7 @@
     import * as ScrollArea from "$lib/components/ui/scroll-area";
     import * as DropdownMenu from "$lib/components/ui/dropdown-menu";
     import * as Dialog from "$lib/components/ui/dialog";
+    import * as AlertDialog from "$lib/components/ui/alert-dialog";
     import { Input } from "$lib/components/ui/input";
     import { Label } from "$lib/components/ui/label";
     import { Textarea } from "$lib/components/ui/textarea";
@@ -33,60 +34,42 @@
     } from "@internationalized/date";
     import { toast } from "svelte-sonner";
 
+    import { taskService } from "$lib/services/taskService";
+    import { categoryService } from "$lib/services/categoryService";
+    import { userStore } from "$lib/stores/userStore.svelte";
+    import type { Task, Category } from "$lib/types";
+
     // --- 1. STATE & DATA ---
     let value = $state<DateValue | undefined>(today(getLocalTimeZone()));
 
-    // Dummy Data dengan field 'date' (YYYY-MM-DD)
-    let tasks = $state([
-        {
-            id: 1,
-            text: "Setup Project SvelteKit",
-            due_date: "2026-02-12T09:00:00.000Z",
-            priority: "High",
-            done: true,
-            tag: "Dev",
-        },
-        {
-            id: 2,
-            text: "Integrate Shadcn UI",
-            due_date: "2026-02-12T11:00:00.000Z",
-            priority: "Medium",
-            done: true,
-            tag: "UI",
-        },
-        {
-            id: 3,
-            text: "Client Meeting",
-            due_date: "2026-02-13T13:00:00.000Z",
-            priority: "High",
-            done: false,
-            tag: "Meeting",
-        },
-        {
-            id: 4,
-            text: "Database Backup",
-            due_date: "2026-02-14T09:00:00.000Z",
-            priority: "Low",
-            done: false,
-            tag: "DevOps",
-        },
-        {
-            id: 5,
-            text: "Fix Auth Bug",
-            due_date: "2026-02-12T15:00:00.000Z",
-            priority: "High",
-            done: false,
-            tag: "Bugfix",
-        },
-    ]);
+    let tasks = $state<Task[]>([]);
+    let categories = $state<Category[]>([]);
+    let isLoading = $state(true);
 
-    let categories = $state(["Dev", "UI", "Backend", "Urgent", "Meeting"]); // Simple list for suggestions
+    // Fetch Data
+    $effect(() => {
+        if (userStore.profile?.ID) {
+            Promise.all([
+                taskService.getTasks(),
+                categoryService.getCategories(),
+            ]).then(([taskRes, catRes]) => {
+                if (taskRes.success && taskRes.data) {
+                    tasks = taskRes.data;
+                }
+                if (catRes.success && catRes.data) {
+                    categories = catRes.data;
+                }
+                isLoading = false;
+            });
+        }
+    });
 
     // State Form Add Task
     let isAddDialogOpen = $state(false);
     let newTask = $state({
         text: "",
-        desc: "",
+        desc: "", // maps to short_desc
+        longDesc: "", // maps to long_desc
         priority: "Medium",
         due_date: "",
         tags: [] as string[],
@@ -102,10 +85,14 @@
                 if (!t.due_date) return false;
                 const taskDate = new Date(t.due_date)
                     .toLocaleDateString("sv")
-                    .split("T")[0]; // YYYY-MM-DD local
+                    .split("T")[0];
                 return taskDate === selectedDateStr;
             })
-            .sort((a, b) => (a.due_date || "").localeCompare(b.due_date || "")),
+            .sort((a, b) => {
+                if (a.status === "ongoing" && b.status !== "ongoing") return -1;
+                if (b.status === "ongoing" && a.status !== "ongoing") return 1;
+                return (a.due_date || "").localeCompare(b.due_date || "");
+            }),
     );
 
     const formattedDateHeader = $derived(
@@ -118,12 +105,22 @@
             : "Select a date",
     );
 
+    // Dynamic Monthly Overview
+    const totalTasks = $derived(tasks.length);
+    const upcomingTasks = $derived(
+        tasks.filter((t) => {
+            if (!t.due_date) return false;
+            return new Date(t.due_date) > new Date();
+        }).length,
+    );
+
     // --- 3. HANDLERS ---
     function openAddDialog() {
         // Reset form tapi set tanggal sesuai kalender
         newTask = {
             text: "",
             desc: "",
+            longDesc: "",
             priority: "Medium",
             due_date: value ? `${value.toString()}T09:00` : "", // Pre-fill with selected date + 09:00
             tags: [],
@@ -131,54 +128,79 @@
         isAddDialogOpen = true;
     }
 
-    function handleAddTask(e: Event) {
+    async function handleAddTask(e: Event) {
         e.preventDefault();
-        // Add task with the SELECTED DATE
-        tasks.push({
-            id: Date.now(),
-            text: newTask.text,
+
+        const payload = {
+            title: newTask.text,
+            short_desc: newTask.desc,
+            long_desc: newTask.longDesc,
+            priority: newTask.priority,
+            status: "todo",
+            tags: newTask.tags,
             due_date: newTask.due_date
                 ? new Date(newTask.due_date).toISOString()
                 : new Date().toISOString(),
-            priority: newTask.priority,
-            done: false,
-            tag: newTask.tags[0] || "General", // Ambil tag pertama sbg utama
-        });
+            user_id: userStore.profile?.ID || 0,
+        };
 
-        isAddDialogOpen = false;
-        toast.success(`Task added for ${selectedDateStr}`);
+        const res = await taskService.createTask(payload);
+
+        if (res.success && res.data) {
+            // Immutable Update (Spread)
+            tasks = [...tasks, res.data];
+            isAddDialogOpen = false;
+            toast.success(`Task added for ${selectedDateStr}`);
+        } else {
+            toast.error("Failed to create task");
+        }
     }
 
     function toggleTag(tagName: string) {
         if (newTask.tags.includes(tagName))
             newTask.tags = newTask.tags.filter((t) => t !== tagName);
-        else newTask.tags.push(tagName);
+        else newTask.tags = [...newTask.tags, tagName];
     }
 
     function addCustomTag(e: KeyboardEvent) {
         if (e.key === "Enter" && tagInput.trim()) {
             e.preventDefault();
             if (!newTask.tags.includes(tagInput.trim()))
-                newTask.tags.push(tagInput.trim());
+                newTask.tags = [...newTask.tags, tagInput.trim()];
             tagInput = "";
         }
     }
 
-    function toggleDone(task: any) {
-        const index = tasks.findIndex((t) => t.id === task.id);
-        if (index !== -1) {
-            tasks[index].done = !tasks[index].done;
-            toast.success(
-                tasks[index].done
-                    ? "Task marked as done"
-                    : "Task marked as undone",
+    async function updateStatus(task: Task, newStatus: string) {
+        const res = await taskService.updateTask(task.ID, {
+            status: newStatus,
+        } as any);
+
+        if (res.success) {
+            // Immutable Update (Map)
+            tasks = tasks.map((t) =>
+                t.ID === task.ID ? { ...t, status: newStatus } : t,
             );
+
+            let msg = "";
+            if (newStatus === "done") msg = "Task completed!";
+            else if (newStatus === "ongoing") msg = "Task started";
+            else msg = "Task moved to Todo";
+            toast.success(msg);
+        } else {
+            toast.error("Failed to update status");
         }
     }
 
-    function deleteTask(id: number) {
-        tasks = tasks.filter((t) => t.id !== id);
-        toast.error("Task deleted from calendar");
+    async function deleteTask(id: number[]) {
+        const res = await taskService.deleteTask(id);
+        if (res.success) {
+            // Immutable Update (Filter)
+            tasks = tasks.filter((t) => !id.includes(t.ID));
+            toast.success("Task deleted");
+        } else {
+            toast.error("Failed to delete task");
+        }
     }
 
     const priorityColor = (p: string) => {
@@ -187,6 +209,56 @@
             return "text-yellow-500 border-yellow-500/20 bg-yellow-500/10";
         return "text-blue-500 border-blue-500/20 bg-blue-500/10";
     };
+
+    const statusColor = (s: string) => {
+        if (s === "done")
+            return "text-muted-foreground border-muted-foreground/20 bg-muted/10";
+        if (s === "ongoing")
+            return "text-blue-500 border-blue-500/20 bg-blue-500/10";
+        return "text-green-500 border-green-500/20 bg-green-500/10";
+    };
+
+    // Helper: Smart Date Display
+    const formatDueDisplay = (dateStr: string | null | undefined) => {
+        if (!dateStr) return "--:--";
+        const d = new Date(dateStr);
+        const now = new Date();
+        const today = new Date();
+        const tomorrow = new Date();
+        tomorrow.setDate(today.getDate() + 1);
+
+        const timeStr = d.toLocaleTimeString("en-US", {
+            hour: "2-digit",
+            minute: "2-digit",
+        });
+
+        if (d.toDateString() === today.toDateString())
+            return `Today, ${timeStr}`;
+        if (d.toDateString() === tomorrow.toDateString())
+            return `Tomorrow, ${timeStr}`;
+
+        return (
+            d.toLocaleDateString("en-US", { month: "short", day: "numeric" }) +
+            `, ${timeStr}`
+        );
+    };
+
+    // Alert Dialog State
+    let isDeleteDialogOpen = $state(false);
+    let taskToDeleteId = $state<number[]>([]);
+
+    function confirmDelete(ids: number[]) {
+        taskToDeleteId = ids;
+        isDeleteDialogOpen = true;
+    }
+
+    async function proceedDelete() {
+        if (taskToDeleteId.length > 0) {
+            await deleteTask(taskToDeleteId);
+            isDeleteDialogOpen = false;
+            taskToDeleteId = [];
+        }
+    }
 </script>
 
 <div class="w-full px-2 md:px-6 bg-background min-h-screen pt-4">
@@ -233,13 +305,15 @@
                         <span class="text-xs text-muted-foreground font-medium"
                             >Total Tasks</span
                         >
-                        <p class="text-2xl font-bold mt-1">24</p>
+                        <p class="text-2xl font-bold mt-1">{totalTasks}</p>
                     </div>
                     <div class="p-3 bg-muted/20 rounded-lg">
                         <span class="text-xs text-muted-foreground font-medium"
                             >Upcoming</span
                         >
-                        <p class="text-2xl font-bold mt-1 text-primary">8</p>
+                        <p class="text-2xl font-bold mt-1 text-primary">
+                            {upcomingTasks}
+                        </p>
                     </div>
                 </Card.Content>
             </Card.Root>
@@ -271,38 +345,35 @@
                     <ScrollArea.Root class="h-[600px] pr-4">
                         {#if selectedTasks.length > 0}
                             <div class="flex flex-col gap-4">
-                                {#each selectedTasks as task}
+                                {#each selectedTasks as task (task.ID)}
                                     <div
                                         class="group flex gap-4 items-start relative pl-2"
                                     >
                                         <div
-                                            class="w-14 shrink-0 text-[11px] font-mono font-bold text-muted-foreground pt-3 text-right"
+                                            class="w-24 shrink-0 text-[10px] font-mono font-bold text-muted-foreground pt-3 text-right"
                                         >
-                                            {task.due_date
-                                                ? new Date(
-                                                      task.due_date,
-                                                  ).toLocaleTimeString(
-                                                      "id-ID",
-                                                      {
-                                                          hour: "2-digit",
-                                                          minute: "2-digit",
-                                                      },
-                                                  )
-                                                : "--:--"}
+                                            {formatDueDisplay(task.due_date)}
                                         </div>
                                         <div
-                                            class="absolute left-[66px] top-0 bottom-0 w-[2px] bg-muted group-last:bottom-auto group-last:h-6"
+                                            class="absolute left-[106px] top-0 bottom-0 w-[2px] bg-muted group-last:bottom-auto group-last:h-6"
                                         ></div>
+                                        <!-- Status Indicator Dot -->
                                         <div
-                                            class="absolute left-[62px] top-3.5 h-2.5 w-2.5 rounded-full border-2 border-background {task.done
+                                            class="absolute left-[102px] top-3.5 h-2.5 w-2.5 rounded-full border-2 border-background {task.status ===
+                                            'done'
                                                 ? 'bg-primary'
-                                                : 'bg-muted-foreground'} z-10"
+                                                : task.status === 'ongoing'
+                                                  ? 'bg-blue-500 animate-pulse'
+                                                  : 'bg-muted-foreground'} z-10"
                                         ></div>
 
                                         <Card.Root
-                                            class="flex-1 mb-2 hover:border-primary/50 transition-colors {task.done
+                                            class="flex-1 mb-2 hover:border-primary/50 transition-colors {task.status ===
+                                            'done'
                                                 ? 'opacity-60 bg-muted/20'
-                                                : 'bg-card'}"
+                                                : task.status === 'ongoing'
+                                                  ? 'bg-blue-500/5 border-l-4 border-l-blue-500 shadow-md'
+                                                  : 'bg-card'}"
                                         >
                                             <Card.Content
                                                 class="p-4 flex items-center justify-between gap-4"
@@ -312,21 +383,32 @@
                                                         class="flex items-center gap-2 mb-1.5"
                                                     >
                                                         <h3
-                                                            class="font-bold text-sm {task.done
+                                                            class="font-bold text-sm {task.status ===
+                                                            'done'
                                                                 ? 'line-through text-muted-foreground'
                                                                 : ''}"
                                                         >
-                                                            {task.text}
+                                                            {task.title}
                                                         </h3>
-                                                        <Badge
-                                                            variant="secondary"
-                                                            class="text-[9px] px-1.5 h-4 font-bold uppercase"
-                                                            >{task.tag}</Badge
-                                                        >
+                                                        {#if task.tags && task.tags.length > 0}
+                                                            <Badge
+                                                                variant="secondary"
+                                                                class="text-[9px] px-1.5 h-4 font-bold uppercase"
+                                                                >{task
+                                                                    .tags[0]}</Badge
+                                                            >
+                                                        {/if}
                                                     </div>
                                                     <div
-                                                        class="flex items-center gap-3"
+                                                        class="flex items-center gap-2"
                                                     >
+                                                        <Badge
+                                                            variant="outline"
+                                                            class="text-[9px] px-1.5 py-0 font-bold uppercase {statusColor(
+                                                                task.status,
+                                                            )}"
+                                                            >{task.status}</Badge
+                                                        >
                                                         <Badge
                                                             variant="outline"
                                                             class="text-[9px] px-1.5 py-0 font-bold uppercase {priorityColor(
@@ -351,27 +433,84 @@
                                                     <DropdownMenu.Content
                                                         align="end"
                                                     >
-                                                        <DropdownMenu.Item
-                                                            onclick={() =>
-                                                                toggleDone(
-                                                                    task,
-                                                                )}
-                                                        >
-                                                            <Check
-                                                                class="mr-2 h-4 w-4"
-                                                            />
-                                                            {task.done
-                                                                ? "Mark as Undone"
-                                                                : "Mark as Done"}
-                                                        </DropdownMenu.Item>
+                                                        {#if task.status === "todo"}
+                                                            <DropdownMenu.Item
+                                                                onclick={() =>
+                                                                    updateStatus(
+                                                                        task,
+                                                                        "ongoing",
+                                                                    )}
+                                                            >
+                                                                <Clock
+                                                                    class="mr-2 h-4 w-4"
+                                                                /> Start Task
+                                                            </DropdownMenu.Item>
+                                                            <DropdownMenu.Item
+                                                                onclick={() =>
+                                                                    updateStatus(
+                                                                        task,
+                                                                        "done",
+                                                                    )}
+                                                            >
+                                                                <Check
+                                                                    class="mr-2 h-4 w-4"
+                                                                /> Mark Done
+                                                            </DropdownMenu.Item>
+                                                        {:else if task.status === "ongoing"}
+                                                            <DropdownMenu.Item
+                                                                onclick={() =>
+                                                                    updateStatus(
+                                                                        task,
+                                                                        "todo",
+                                                                    )}
+                                                            >
+                                                                <X
+                                                                    class="mr-2 h-4 w-4"
+                                                                /> Mark Todo
+                                                            </DropdownMenu.Item>
+                                                            <DropdownMenu.Item
+                                                                onclick={() =>
+                                                                    updateStatus(
+                                                                        task,
+                                                                        "done",
+                                                                    )}
+                                                            >
+                                                                <Check
+                                                                    class="mr-2 h-4 w-4"
+                                                                /> Mark Done
+                                                            </DropdownMenu.Item>
+                                                        {:else}
+                                                            <DropdownMenu.Item
+                                                                onclick={() =>
+                                                                    updateStatus(
+                                                                        task,
+                                                                        "todo",
+                                                                    )}
+                                                            >
+                                                                <X
+                                                                    class="mr-2 h-4 w-4"
+                                                                /> Mark Todo
+                                                            </DropdownMenu.Item>
+                                                            <DropdownMenu.Item
+                                                                onclick={() =>
+                                                                    updateStatus(
+                                                                        task,
+                                                                        "ongoing",
+                                                                    )}
+                                                            >
+                                                                <Clock
+                                                                    class="mr-2 h-4 w-4"
+                                                                /> Mark Ongoing
+                                                            </DropdownMenu.Item>
+                                                        {/if}
                                                         <DropdownMenu.Separator
                                                         />
                                                         <DropdownMenu.Item
                                                             class="text-destructive"
                                                             onclick={() =>
-                                                                deleteTask(
-                                                                    task.id,
-                                                                )}
+                                                                confirmDelete([
+                                                                    task.ID,
+                                                                ])}
                                                         >
                                                             <Trash2
                                                                 class="mr-2 h-4 w-4"
@@ -392,7 +531,7 @@
                             </div>
                         {:else}
                             <div
-                                class="flex flex-col items-center justify-center h-[400px] text-center border-2 border-dashed rounded-xl bg-muted/10"
+                                class="flex flex-col items-center justify-center h-[400px] text-center border-2 border-dashed rounded-xl bg-muted/10 ml-[50px] mr-2"
                             >
                                 <div
                                     class="bg-background p-4 rounded-full mb-4 shadow-sm"
@@ -446,7 +585,17 @@
                         class="font-bold"
                     />
                 </div>
-
+                <Label
+                    for="short_desc"
+                    class="text-[10px] uppercase font-black text-muted-foreground tracking-widest"
+                    >Short Description</Label
+                >
+                <Input
+                    id="short_desc"
+                    bind:value={newTask.desc}
+                    placeholder="Brief summary for the calendar view..."
+                    class="bg-muted/10 border-dashed"
+                />
                 <div class="grid gap-2">
                     <Label>Labels</Label>
                     <div
@@ -473,12 +622,25 @@
                         {#each categories as cat}
                             <button
                                 type="button"
-                                onclick={() => toggleTag(cat)}
+                                onclick={() => toggleTag(cat.name)}
                                 class="text-[10px] px-2 py-1 border rounded-full hover:bg-muted"
-                                >{cat}</button
+                                >{cat.name}</button
                             >
                         {/each}
                     </div>
+                </div>
+
+                <div class="grid gap-2">
+                    <Label
+                        class="text-[10px] uppercase font-black text-muted-foreground"
+                        >Detailed Description</Label
+                    >
+                    <Textarea
+                        bind:value={newTask.longDesc}
+                        placeholder="Detailed context for this date..."
+                        rows={4}
+                        class="bg-muted/10 resize-none"
+                    />
                 </div>
 
                 <div class="grid grid-cols-2 gap-4">
@@ -537,6 +699,25 @@
         </form>
     </Dialog.Content>
 </Dialog.Root>
+
+<AlertDialog.Root bind:open={isDeleteDialogOpen}>
+    <AlertDialog.Content>
+        <AlertDialog.Header>
+            <AlertDialog.Title>Are you absolutely sure?</AlertDialog.Title>
+            <AlertDialog.Description>
+                This action cannot be undone. This will permanently delete the
+                task from our servers.
+            </AlertDialog.Description>
+        </AlertDialog.Header>
+        <AlertDialog.Footer>
+            <AlertDialog.Cancel>Cancel</AlertDialog.Cancel>
+            <AlertDialog.Action
+                class="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                onclick={proceedDelete}>Delete</AlertDialog.Action
+            >
+        </AlertDialog.Footer>
+    </AlertDialog.Content>
+</AlertDialog.Root>
 
 <style>
     :global(.custom-time-input::-webkit-calendar-picker-indicator) {
