@@ -1,5 +1,5 @@
-import { client } from "$lib/api";
-import type { APIResponse, Task, CreateTaskPayload, UpdateTaskPayload } from "$lib/types";
+import { client } from "$lib";
+import type { APIResponse, Task, CreateTaskPayload, UpdateTaskPayload } from "$lib";
 
 export const taskService = {
     // [POST] /api/tasks

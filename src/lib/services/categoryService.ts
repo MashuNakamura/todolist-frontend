@@ -1,4 +1,4 @@
-import { client } from "$lib/api";
+import { client } from "$lib";
 import type { APIResponse, CreateCategoryPayload, Category, UpdateCategoryPayload } from '@/types';
 
 export const categoryService = {
