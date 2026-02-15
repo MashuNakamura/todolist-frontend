@@ -5,7 +5,7 @@
     import { Label } from "$lib/components/ui/label";
     import { toast } from "svelte-sonner";
     import { authService } from "$lib/services/authService";
-    import { Loader2, ArrowLeft } from "lucide-svelte";
+    import { Loader2, ArrowLeft, Home } from "lucide-svelte";
 
     let view = $state("login");
     let isLoading = $state(false);
@@ -124,7 +124,20 @@
     }
 </script>
 
-<div class="min-h-screen flex items-center justify-center bg-muted/40 p-4">
+<div
+    class="min-h-screen flex items-center justify-center bg-muted/40 p-4 relative"
+>
+    <a
+        href="/"
+        class="absolute top-4 left-4 md:top-8 md:left-8 flex items-center gap-2 text-sm font-bold text-muted-foreground hover:text-primary transition-colors"
+    >
+        <div
+            class="h-8 w-8 bg-background border rounded-lg flex items-center justify-center shadow-sm"
+        >
+            <Home class="h-4 w-4" />
+        </div>
+        <span class="hidden sm:inline">Back to Home</span>
+    </a>
     <Card.Root
         class="w-full max-w-md shadow-xl border-none sm:border bg-background"
     >
@@ -330,6 +343,12 @@
                         class="text-sm text-muted-foreground hover:text-foreground underline"
                     >
                         Resend Code
+                    </button>
+                    <button
+                        onclick={() => (view = "login")}
+                        class="text-sm flex items-center justify-center gap-2 text-muted-foreground hover:text-foreground mx-auto pt-2"
+                    >
+                        <ArrowLeft class="h-4 w-4" /> Back to Login
                     </button>
                 </div>
             {/if}
