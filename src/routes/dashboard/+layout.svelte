@@ -12,7 +12,6 @@
 
     let { children } = $props();
 
-    // Init null biar aman
     let user = $state<UserProfile | null>(null);
     let isLoading = $state(true);
 
@@ -20,18 +19,14 @@
         const token = localStorage.getItem("token");
 
         if (!token) {
-            // Gak ada token? Langsung tendang keluar
             goto("/auth");
             return;
         }
-
-        // Ada token? Validasi ke server
         const res = await authService.GetUserProfile();
         if (res.success && res.data) {
             user = res.data;
-            isLoading = false; // Data siap, tampilkan dashboard
+            isLoading = false;
         } else {
-            // Token expired/invalid
             localStorage.removeItem("token");
             goto("/auth");
         }

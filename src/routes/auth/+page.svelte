@@ -34,7 +34,7 @@
             if (res.success && res.data) {
                 localStorage.setItem("token", res.data.token);
                 toast.success("Login successful!");
-                window.location.href = "/tasks";
+                window.location.href = "/dashboard";
             } else {
                 let res_error = Number(res.error);
                 if (res_error >= 400 && res_error < 500) {

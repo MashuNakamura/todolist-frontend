@@ -51,8 +51,7 @@ export interface Task {
     long_desc: string;
     priority: string;
     status: string;
-    time: string;
-    date: string;
+    due_date?: string; // ISO 8601 String
     tags: string[];
     user_id: number;
 }
