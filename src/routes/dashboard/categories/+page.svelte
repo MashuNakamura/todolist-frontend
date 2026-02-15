@@ -17,6 +17,7 @@
         Search,
         Tag,
         Check,
+        Loader2,
     } from "lucide-svelte";
     import { toast } from "svelte-sonner";
 
@@ -123,13 +124,9 @@
     }
 
     async function handleDelete(id: number) {
-        // Confirm moved to AlertDialog
-        // if (!confirm(...)) return;
-
         const res = await categoryService.deleteCategory(id);
 
         if (res.success) {
-            // Immutable Update
             rawCategories = rawCategories.filter((c) => c.ID !== id);
             toast.success("Category deleted");
         } else {
@@ -139,82 +136,96 @@
 
     async function handleSave(e: Event) {
         e.preventDefault();
-        isLoading = true;
+
+        if (isLoading) return;
 
         if (isEditMode && editingId) {
             const originalCat = rawCategories.find((c) => c.ID === editingId);
-
             if (
                 originalCat &&
                 originalCat.name === formData.name &&
                 originalCat.color === formData.color
             ) {
                 toast.info("No changes detected");
-                isLoading = false;
                 isDialogOpen = false;
                 return;
             }
+        }
 
-            // --- UPDATE LOGIC ---
-            const payload = {
-                ID: editingId,
-                name: formData.name,
-                color: formData.color,
-            };
+        try {
+            isLoading = true;
 
-            const res = await categoryService.updateCategory(
-                editingId,
-                payload,
-            );
+            if (isEditMode && editingId) {
+                // --- UPDATE LOGIC ---
+                const payload = {
+                    ID: editingId,
+                    name: formData.name,
+                    color: formData.color,
+                };
 
-            if (res.success) {
-                toast.success("Category updated successfully");
-
-                // 1. Update Category (Immutable .map)
-                rawCategories = rawCategories.map((c) =>
-                    c.ID === editingId
-                        ? { ...c, name: formData.name, color: formData.color }
-                        : c,
+                const res = await categoryService.updateCategory(
+                    editingId,
+                    payload,
                 );
 
-                // 2. Sync Rename Task (Update Local Tasks Array)
-                if (originalCat && originalCat.name !== formData.name) {
+                if (res.success) {
+                    toast.success("Category updated successfully");
+
+                    rawCategories = rawCategories.map((c) =>
+                        c.ID === editingId
+                            ? {
+                                  ...c,
+                                  name: formData.name,
+                                  color: formData.color,
+                              }
+                            : c,
+                    );
+
+                    const originalCat = rawCategories.find(
+                        (c) => c.ID === editingId,
+                    );
+
                     tasks = tasks.map((t) => {
-                        if (t.tags && t.tags.includes(originalCat.name)) {
-                            // Replace old tag with new tag
-                            const newTags = t.tags.map((tag) =>
-                                tag === originalCat.name ? formData.name : tag,
-                            );
-                            return { ...t, tags: newTags };
+                        if (t.tags.includes(originalCat?.name || "")) {
+                            return {
+                                ...t,
+                                tags: t.tags.map((tag) =>
+                                    tag === originalCat?.name
+                                        ? formData.name
+                                        : tag,
+                                ),
+                            };
                         }
                         return t;
                     });
+
+                    isDialogOpen = false;
+                } else {
+                    toast.error(res.message || "Failed to update category");
                 }
-
-                isDialogOpen = false;
             } else {
-                toast.error(res.message || "Failed to update category");
-            }
-        } else {
-            // --- CREATE LOGIC ---
-            const payload = {
-                name: formData.name,
-                color: formData.color,
-            };
+                // --- CREATE LOGIC ---
+                const payload = {
+                    name: formData.name,
+                    color: formData.color,
+                };
 
-            const res = await categoryService.createCategory(payload);
+                const res = await categoryService.createCategory(payload);
 
-            if (res.success && res.data) {
-                toast.success("New category created");
-                // Immutable Update (.spread)
-                rawCategories = [...rawCategories, res.data];
-                isDialogOpen = false;
-            } else {
-                toast.error(res.message || "Failed to create category");
+                if (res.success && res.data) {
+                    toast.success("New category created");
+                    rawCategories = [...rawCategories, res.data];
+                    isDialogOpen = false;
+                } else {
+                    toast.error(res.message || "Failed to create category");
+                }
             }
+        } catch (error) {
+            console.error(error);
+            toast.error("An error occurred");
+        } finally {
+            isLoading = false;
         }
-
-        isLoading = false;
     }
 </script>
 
@@ -374,7 +385,12 @@
                     onclick={() => (isDialogOpen = false)}>Cancel</Button
                 >
                 <Button type="submit" disabled={isLoading}>
-                    {isLoading ? "Saving..." : isEditMode ? "Update" : "Create"}
+                    {#if isLoading}
+                        <Loader2 class="mr-2 h-4 w-4 animate-spin" />
+                        Saving...
+                    {:else}
+                        {isEditMode ? "Update" : "Create"}
+                    {/if}
                 </Button>
             </Dialog.Footer>
         </form>

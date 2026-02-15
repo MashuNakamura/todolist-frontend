@@ -12,7 +12,7 @@
         CardHeader,
         CardTitle,
     } from "$lib/components/ui/card";
-    import { Moon, Sun, Monitor, Save } from "lucide-svelte";
+    import { Moon, Sun, Monitor, Save, Loader2 } from "lucide-svelte";
     import { authService } from "@/services/authService";
     import type { UserProfile } from "@/types";
     import { userStore } from "$lib/stores/userStore.svelte";
@@ -29,6 +29,7 @@
     });
 
     let isSecurityLoading = $state(false);
+    let isProfileLoading = $state(false);
 
     let originalName = $state(profile.name);
     let hasChanges = $derived(profile.name !== originalName);
@@ -107,26 +108,44 @@
 
         if (!hasChanges) return;
 
-        authService.UpdateUserProfile(profile).then((res) => {
-            if (res.success) {
-                userStore.updateName(profile.name);
-                toast.success("Settings saved successfully!", {
-                    description: "Your profile name has been updated.",
-                    action: {
-                        label: "Close",
-                        onClick: () => toast.dismiss(),
-                    },
-                });
-            } else {
+        if (!hasChanges || isProfileLoading) return;
+
+        isProfileLoading = true;
+
+        authService
+            .UpdateUserProfile(profile)
+            .then((res) => {
+                if (res.success) {
+                    userStore.updateName(profile.name);
+                    toast.success("Settings saved successfully!", {
+                        description: "Your profile name has been updated.",
+                        action: {
+                            label: "Close",
+                            onClick: () => toast.dismiss(),
+                        },
+                    });
+                } else {
+                    toast.error("Failed to save settings", {
+                        description: res.message,
+                        action: {
+                            label: "Close",
+                            onClick: () => toast.dismiss(),
+                        },
+                    });
+                }
+            })
+            .catch((err: any) => {
                 toast.error("Failed to save settings", {
-                    description: res.message,
+                    description: err.message,
                     action: {
                         label: "Close",
                         onClick: () => toast.dismiss(),
                     },
                 });
-            }
-        });
+            })
+            .finally(() => {
+                isProfileLoading = false;
+            });
 
         originalName = profile.name;
     }
@@ -203,10 +222,17 @@
                                 <Button
                                     onclick={saveSettings}
                                     size="sm"
-                                    disabled={!hasChanges}
+                                    disabled={!hasChanges || isProfileLoading}
                                     class="shrink-0"
                                 >
-                                    <Save class="mr-2 h-3 w-3" /> Update
+                                    {#if isProfileLoading}
+                                        <Loader2
+                                            class="mr-2 h-3 w-3 animate-spin"
+                                        />
+                                        Updating...
+                                    {:else}
+                                        <Save class="mr-2 h-3 w-3" /> Update
+                                    {/if}
                                 </Button>
                             </div>
                             <p class="text-[0.8rem] text-muted-foreground">
@@ -271,9 +297,14 @@
                                 class="w-full mt-2"
                                 disabled={isSecurityLoading}
                             >
-                                {isSecurityLoading
-                                    ? "Updating..."
-                                    : "Update Password"}
+                                {#if isSecurityLoading}
+                                    <Loader2
+                                        class="mr-2 h-4 w-4 animate-spin"
+                                    />
+                                    Updating...
+                                {:else}
+                                    Update Password
+                                {/if}
                             </Button>
                         </div>
                     </form></CardContent

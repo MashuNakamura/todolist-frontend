@@ -14,6 +14,7 @@
         Check,
         Trash2,
         Edit,
+        Loader2,
     } from "lucide-svelte";
     import { Calendar } from "$lib/components/ui/calendar";
     import * as Card from "$lib/components/ui/card";
@@ -45,6 +46,7 @@
     let tasks = $state<Task[]>([]);
     let categories = $state<Category[]>([]);
     let isLoading = $state(true);
+    let isSubmitting = $state(false);
 
     // Fetch Data
     $effect(() => {
@@ -131,6 +133,8 @@
     async function handleAddTask(e: Event) {
         e.preventDefault();
 
+        if (isSubmitting) return;
+
         const payload = {
             title: newTask.text,
             short_desc: newTask.desc,
@@ -144,15 +148,23 @@
             user_id: userStore.profile?.ID || 0,
         };
 
-        const res = await taskService.createTask(payload);
+        try {
+            isSubmitting = true;
 
-        if (res.success && res.data) {
-            // Immutable Update (Spread)
-            tasks = [...tasks, res.data];
-            isAddDialogOpen = false;
-            toast.success(`Task added for ${selectedDateStr}`);
-        } else {
-            toast.error("Failed to create task");
+            const res = await taskService.createTask(payload);
+
+            if (res.success && res.data) {
+                tasks = [...tasks, res.data];
+                isAddDialogOpen = false;
+                toast.success(`Task added for ${selectedDateStr}`);
+            } else {
+                toast.error("Failed to create task");
+            }
+        } catch (error) {
+            console.error(error);
+            toast.error("Network error");
+        } finally {
+            isSubmitting = false;
         }
     }
 
@@ -694,7 +706,14 @@
                     type="button"
                     onclick={() => (isAddDialogOpen = false)}>Cancel</Button
                 >
-                <Button type="submit">Create Task</Button>
+                <Button type="submit" disabled={isSubmitting}>
+                    {#if isSubmitting}
+                        <Loader2 class="mr-2 h-4 w-4 animate-spin" />
+                        Saving...
+                    {:else}
+                        Create Task
+                    {/if}
+                </Button>
             </Dialog.Footer>
         </form>
     </Dialog.Content>

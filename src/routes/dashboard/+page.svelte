@@ -35,6 +35,7 @@
         Eye,
         X,
         Hash,
+        Loader2,
     } from "lucide-svelte";
     import { toast } from "svelte-sonner";
     import { taskService, type Task } from "$lib";
@@ -44,6 +45,7 @@
     // Task State
     let tasks = $state<Task[]>([]);
     let originalTaskData = $state<any>(null);
+    let isSubmitting = $state(false);
 
     // Category State
     let categories = $state<Category[]>([]);
@@ -232,6 +234,8 @@
     async function handleSaveTask(e: Event) {
         e.preventDefault();
 
+        if (isSubmitting) return;
+
         if (!newTask.text.trim()) {
             toast.error("Task title is required");
             return;
@@ -268,6 +272,7 @@
         };
 
         try {
+            isSubmitting = true;
             if (isEditMode && editingTaskId) {
                 // UPDATE
                 const res = await taskService.updateTask(
@@ -291,6 +296,7 @@
                             : t,
                     );
                     toast.success("Task updated!");
+                    isAddDialogOpen = false;
                 } else {
                     toast.error("Update failed: " + res.message);
                 }
@@ -314,6 +320,7 @@
                         },
                     ];
                     toast.success("Task created!");
+                    isAddDialogOpen = false;
                 } else {
                     toast.error("Create failed: " + res.message);
                 }
@@ -326,12 +333,15 @@
                 due_date: "",
                 tags: [],
             };
-            isAddDialogOpen = false;
-            isEditMode = false;
-            editingTaskId = null;
+            if (!isAddDialogOpen) {
+                isEditMode = false;
+                editingTaskId = null;
+            }
         } catch (error) {
             console.error("Error saving task:", error);
             toast.error("Failed to save task");
+        } finally {
+            isSubmitting = false;
         }
     }
 
@@ -1086,8 +1096,17 @@
                 >
                     Cancel
                 </Button>
-                <Button type="submit" class="font-bold shadow-md">
-                    {isEditMode ? "Update Changes" : "Save Task"}
+                <Button
+                    type="submit"
+                    class="font-bold shadow-md"
+                    disabled={isSubmitting}
+                >
+                    {#if isSubmitting}
+                        <Loader2 class="mr-2 h-4 w-4 animate-spin" />
+                        {isEditMode ? "Updating..." : "Saving..."}
+                    {:else}
+                        {isEditMode ? "Update Changes" : "Save Task"}
+                    {/if}
                 </Button>
             </Dialog.Footer>
         </form>

@@ -30,6 +30,7 @@
         X,
         Filter,
         ListFilter,
+        Loader2,
     } from "lucide-svelte";
     import { toast } from "svelte-sonner";
     import { taskService } from "$lib/services/taskService";
@@ -41,6 +42,7 @@
     let tasks = $state<Task[]>([]);
     let categories = $state<Category[]>([]);
     let isLoading = $state(true);
+    let isSubmitting = $state(false);
 
     // Filter States
     let searchQuery = $state("");
@@ -237,6 +239,8 @@
     async function handleSaveTask(e: Event) {
         e.preventDefault();
 
+        if (isSubmitting) return;
+
         const payload = {
             title: newTask.text,
             short_desc: newTask.desc,
@@ -252,6 +256,8 @@
         };
 
         try {
+            isSubmitting = true;
+
             if (isEditMode && editingTaskId) {
                 const res = await taskService.updateTask(
                     editingTaskId,
@@ -263,6 +269,7 @@
                     );
                     toast.success("Task updated");
                 }
+                isAddDialogOpen = false;
             } else {
                 const res = await taskService.createTask(payload as any);
                 if (res.success && res.data) {
@@ -273,6 +280,8 @@
             isAddDialogOpen = false;
         } catch (error) {
             toast.error("Failed to save task");
+        } finally {
+            isSubmitting = false;
         }
     }
 
@@ -700,8 +709,14 @@
                     type="button"
                     onclick={() => (isAddDialogOpen = false)}>Cancel</Button
                 >
-                <Button type="submit">{isEditMode ? "Update" : "Create"}</Button
-                >
+                <Button type="submit" disabled={isSubmitting}>
+                    {#if isSubmitting}
+                        <Loader2 class="mr-2 h-4 w-4 animate-spin" />
+                        {isEditMode ? "Updating..." : "Saving..."}
+                    {:else}
+                        {isEditMode ? "Update" : "Create"}
+                    {/if}
+                </Button>
             </Dialog.Footer>
         </form>
     </Dialog.Content>
