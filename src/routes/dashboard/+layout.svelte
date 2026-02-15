@@ -1,5 +1,6 @@
 <script lang="ts">
     import { onMount } from "svelte";
+    import Logo from "$lib/components/ui/Logo.svelte";
     import { goto } from "$app/navigation";
     import { authService } from "$lib/services/authService";
     import AppSidebar from "$lib/components/ui/AppSidebar.svelte";
@@ -43,12 +44,16 @@
 
         <main class="flex flex-1 flex-col overflow-hidden">
             <header class="flex h-16 shrink-0 items-center gap-2 border-b px-6">
-                <div class="flex items-center gap-2">
+                <div class="flex items-center gap-4">
                     <SidebarTrigger class="-ml-1 h-9 w-9 md:h-8 md:w-8" />
                     <Separator orientation="vertical" class="mr-2 h-4" />
-                    <span class="text-sm font-medium text-muted-foreground">
-                        {user?.name}'s Todo
-                    </span>
+
+                    <div class="flex items-center gap-2">
+                        <Logo className="h-6 w-auto" />
+                        <span class="text-sm font-semibold tracking-tight">
+                            {user?.name}'s Todo
+                        </span>
+                    </div>
                 </div>
             </header>
 
